@@ -1,0 +1,26 @@
+# Local TeamSpeak 3 server for testing the bot (development only).
+#
+#   docker compose -f dev/docker-compose.yml up -d
+#   docker compose -f dev/docker-compose.yml logs ts3   # admin token on first start
+#   docker compose -f dev/docker-compose.yml down       # stop (data stays in the volume)
+#   docker compose -f dev/docker-compose.yml down -v    # stop and delete server data
+
+services:
+  ts3:
+    image: teamspeak:3.13.8
+    container_name: tsmusic-dev-ts3
+    restart: unless-stopped
+    environment:
+      TS3SERVER_LICENSE: accept
+    # Ports bound on all interfaces. With WSL mirrored networking the Windows TS client
+    # connects to localhost, but the server is also reachable from the LAN/VPN.
+    # The bot (inside WSL) connects to localhost.
+    ports:
+      - "9987:9987/udp"             # voice (client and bot)
+      - "127.0.0.1:10011:10011"     # ServerQuery (raw), local only
+      - "30033:30033"               # file transfer
+    volumes:
+      - ts3-data:/var/ts3server
+
+volumes:
+  ts3-data:
