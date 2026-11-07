@@ -1,0 +1,91 @@
+# TeamSpeak music bot configuration.
+#
+# Every field is optional: a missing one gets its default value (as shown below).
+# An unknown key (e.g. a typo) is a startup error.
+# [live]    = takes effect immediately (also via `!bot config set`)
+# [restart] = requires a bot restart
+# Durations are written as text: "30s", "1m", "10m", "1h 30m".
+# Secrets do NOT belong in this file: keep them in secrets.toml.
+
+[teamspeak]
+address = "localhost"               # [restart] host, host:port, IP or server nickname (default port 9987)
+nickname = "MusicBot"               # [live]
+description = "Exemplary description"   # [live]
+identity_file = "identity.toml"     # [restart] relative to paths.state_dir
+# Bot's home channel: ID or name/path ("Parent/Channel").
+# Not set = server's default channel.
+# home_channel = 22                 # [live]
+
+[audio]
+bitrate = 96                        # [live] Opus kb/s, range 32-192
+complexity = 10                     # [live] 0-10
+start_buffer = "3s"                 # [live] buffered before a song starts
+max_buffer = "5s"                   # [live] upper limit of the frame buffer
+default_volume = 50                 # [live] 0-100
+max_volume = 100                    # [live] 0-100
+pause_release_after = "5m"          # [live] release the stream after being paused this long
+
+# Events (same as in TS3AudioBot). Every action is optional,
+# an event without actions does nothing.
+
+[events.on_connect]                 # bot connected to the server
+# message = "Hello!"                # [live] channel message after joining
+
+[events.on_disconnect]              # bot disconnects on shutdown
+# message = "See you later"         # [live] disconnect reason shown to users
+
+[events.on_idle]                    # nothing played for `delay` (pause counts as idle)
+delay = "10m"                       # [live]
+# sound = "/home/tsmusic/channel-music/goodbye.wav"   # [live]
+# message = "Nothing is playing, going back home"      # [live]
+return_home = true                  # [live] go back to the home channel (after the sound)
+
+[events.on_alone]                   # bot alone in its channel for `delay`
+delay = "1m"                        # [live]
+# sound = "/home/tsmusic/channel-music/goodbye.wav"   # [live]
+# message = "..."                     # [live]
+return_home = true                  # [live]
+
+[events.on_party]                   # bot was alone and someone joined / bot entered a channel with users
+delay = "0s"                        # [live]
+# sound = "/home/tsmusic/channel-music/welcome.wav"   # [live] played before the queue
+# message = "..."                     # [live]
+
+[events.on_song_start]              # a new song started
+# message = "Now playing: {artist} - {title}"         # [live] {title} {artist} {source}
+
+[queue]
+# max_len = 1000                    # [live] not set = unlimited
+show_page_size = 15                 # [live] entries per page in !queue show
+
+[permissions]
+# Checked in order: admin -> blocked -> user.
+# Groups: name (case-insensitive) or ID, e.g. ["Admin", 6].
+admin_uids = []                     # [live]
+admin_groups = ["Admin", "Owner"]   # [live]
+user_uids = []                      # [live] empty user_* = everyone is a user
+user_groups = []                    # [live]
+blocked_uids = []                   # [live] cannot control or summon the bot
+blocked_groups = []                 # [live] e.g. ["Guest"], admin takes precedence
+
+[sources]
+default = "tidal"                   # [live] tidal | spotify | youtube | soundcloud | local
+
+[sources.tidal]
+quality = "high"                    # [live] low | high | lossless
+
+[sources.youtube]
+yt_dlp_path = "yt-dlp"              # [live]
+
+[sources.local]
+# Folder with local files. Paths outside it are blocked.
+# Not set = local source disabled.
+# music_dir = "/home/tsmusic/music" # [live]
+
+[paths]
+state_dir = "state"                 # [restart] identity, Tidal session. On the VPS: /var/lib/tsmusic
+ffmpeg_path = "ffmpeg"              # [live]
+
+[logging]
+level = "info"                      # [live] error | warn | info | debug | trace (RUST_LOG takes precedence)
+metrics_interval = "60s"            # [live]
