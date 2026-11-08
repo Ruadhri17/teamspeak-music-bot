@@ -6,7 +6,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use super::{Config, ConfigError, ConfigResult};
+use super::{Config, ConfigError, ConfigResult, validate::validate};
 
 /// Commented template written by `tsmusic init`. Path is relative to this source file.
 pub(super) const TEMPLATE: &str = include_str!("../../config.toml.template");
@@ -92,7 +92,11 @@ impl ConfigLocation {
                 source,
             })?;
 
-        // TODO: validate
+        validate(&config).map_err(|source| ConfigError::Invalid {
+            path: self.file_path.clone(),
+            source,
+        })?;
+
         self.resolve_paths(&mut config);
         Ok(config)
     }

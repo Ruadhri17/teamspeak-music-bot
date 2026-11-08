@@ -129,9 +129,9 @@ fn load_empty_file_gives_defaults() {
 
 #[test]
 fn load_reads_values_and_keeps_other_defaults() {
-    let (_dir, location) = setup_with("[teamspeak]\nnickname = \"DJ\"\n\n[audio]\nbitrate = 128\n");
+    let (_dir, location) = setup_with("[teamspeak]\nnickname = \"DJ Bot\"\n\n[audio]\nbitrate = 128\n");
     let config = location.load().unwrap();
-    assert_eq!(config.teamspeak.nickname, "DJ");
+    assert_eq!(config.teamspeak.nickname, "DJ Bot");
     assert_eq!(config.audio.bitrate.get(), 128);
     assert_eq!(config.teamspeak.address, Config::default().teamspeak.address);
     assert_eq!(config.audio.complexity, Config::default().audio.complexity);
@@ -310,4 +310,15 @@ fn write_atomic_fails_when_directory_is_missing() {
     let location = ConfigLocation::new(dir.path().join("missing/config.toml")).unwrap();
     let err = location.write_atomic("new").unwrap_err();
     assert!(matches!(err, ConfigError::Write { .. }), "{err:?}");
+}
+
+#[test]
+fn load_rejects_config_breaking_validation_rule() {
+    let (_dir, location) = setup_with("[audio]\ndefault_volume = 80\nmax_volume = 50\n");
+    let err = location.load().unwrap_err();
+    assert!(
+        matches!(&err, ConfigError::Invalid { path, .. } if path == location.file_path()),
+        "{err:?}"
+    );
+    assert!(cause(&err).contains("audio.default_volume"), "{}", cause(&err));
 }

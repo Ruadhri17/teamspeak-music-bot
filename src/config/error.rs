@@ -1,5 +1,7 @@
 use std::path::PathBuf;
 
+use super::validate::ValidationError;
+
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
     #[error("invalid config path {path}")]
@@ -34,6 +36,13 @@ pub enum ConfigError {
         path: PathBuf,
         #[source]
         source: toml::de::Error,
+    },
+
+    #[error("invalid config file {path}")]
+    Invalid {
+        path: PathBuf,
+        #[source]
+        source: ValidationError,
     },
 }
 
