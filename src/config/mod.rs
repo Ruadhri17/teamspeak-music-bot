@@ -15,6 +15,7 @@ mod validate;
 mod values;
 
 pub use error::{ConfigError, ConfigResult};
+pub use location::ConfigLocation;
 pub use model::*;
 pub use values::{Bitrate, Complexity, Volume};
 

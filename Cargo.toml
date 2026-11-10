@@ -3,6 +3,10 @@ name = "teamspeak-music-bot"
 version = "0.1.0"
 edition = "2024"
 
+[[bin]]
+name = "tsmusic"
+path = "src/main.rs"
+
 [dependencies]
 anyhow = "1.0.104"
 audiopus = "0.3.0-rc.0"

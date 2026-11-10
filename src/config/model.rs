@@ -322,7 +322,8 @@ impl Default for LoggingConfig {
     }
 }
 
-#[derive(Deserialize, Serialize, Default, Debug, Clone, Copy, PartialEq, Eq)]
+/// `ValueEnum` lets `--log-level` use the same lowercase names as the config file.
+#[derive(Deserialize, Serialize, Default, Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 #[serde(rename_all = "lowercase")]
 pub enum LogLevel {
     Error,
