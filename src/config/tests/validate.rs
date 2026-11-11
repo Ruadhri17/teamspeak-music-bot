@@ -23,7 +23,9 @@ fn with_nickname(nickname: &str) -> Config {
 }
 
 fn broken_field(config: &Config) -> &'static str {
-    validate(config).expect_err("config should be invalid").field
+    validate(config)
+        .expect_err("config should be invalid")
+        .field
 }
 
 type Case = (&'static str, fn(&mut Config));
@@ -81,10 +83,17 @@ fn zero_max_buffer_is_rejected() {
 fn nickname_length_bounds() {
     assert!(validate(&with_nickname("abc")).is_ok());
     assert!(validate(&with_nickname(&"a".repeat(30))).is_ok());
-    assert!(validate(&with_nickname(&"ą".repeat(30))).is_ok(), "counts characters, not bytes");
+    assert!(
+        validate(&with_nickname(&"ą".repeat(30))).is_ok(),
+        "counts characters, not bytes"
+    );
 
     for nickname in ["", "   ", "ab", &"a".repeat(31)] {
-        assert_eq!(broken_field(&with_nickname(nickname)), "teamspeak.nickname", "{nickname:?}");
+        assert_eq!(
+            broken_field(&with_nickname(nickname)),
+            "teamspeak.nickname",
+            "{nickname:?}"
+        );
     }
 }
 
@@ -111,12 +120,16 @@ fn empty_required_values_are_rejected() {
     assert_each_rejected(&[
         ("teamspeak.address", |c| c.teamspeak.address = String::new()),
         ("teamspeak.address", |c| c.teamspeak.address = "  ".into()),
-        ("teamspeak.identity_file", |c| c.teamspeak.identity_file = PathBuf::new()),
+        ("teamspeak.identity_file", |c| {
+            c.teamspeak.identity_file = PathBuf::new()
+        }),
         ("teamspeak.home_channel", |c| {
             c.teamspeak.home_channel = Some(ChannelRef::Name(" ".into()))
         }),
         ("paths.state_dir", |c| c.paths.state_dir = PathBuf::new()),
-        ("paths.ffmpeg_path", |c| c.paths.ffmpeg_path = PathBuf::new()),
+        ("paths.ffmpeg_path", |c| {
+            c.paths.ffmpeg_path = PathBuf::new()
+        }),
         ("sources.youtube.yt_dlp_path", |c| {
             c.sources.youtube.yt_dlp_path = PathBuf::new()
         }),
@@ -126,17 +139,33 @@ fn empty_required_values_are_rejected() {
 #[test]
 fn empty_optional_values_are_rejected() {
     assert_each_rejected(&[
-        ("sources.local.music_dir", |c| c.sources.local.music_dir = Some(PathBuf::new())),
-        ("events.on_idle.sound", |c| c.events.on_idle.sound = Some(PathBuf::new())),
-        ("events.on_alone.sound", |c| c.events.on_alone.sound = Some(PathBuf::new())),
-        ("events.on_party.sound", |c| c.events.on_party.sound = Some(PathBuf::new())),
-        ("events.on_connect.message", |c| c.events.on_connect.message = Some(String::new())),
+        ("sources.local.music_dir", |c| {
+            c.sources.local.music_dir = Some(PathBuf::new())
+        }),
+        ("events.on_idle.sound", |c| {
+            c.events.on_idle.sound = Some(PathBuf::new())
+        }),
+        ("events.on_alone.sound", |c| {
+            c.events.on_alone.sound = Some(PathBuf::new())
+        }),
+        ("events.on_party.sound", |c| {
+            c.events.on_party.sound = Some(PathBuf::new())
+        }),
+        ("events.on_connect.message", |c| {
+            c.events.on_connect.message = Some(String::new())
+        }),
         ("events.on_disconnect.message", |c| {
             c.events.on_disconnect.message = Some(" ".into())
         }),
-        ("events.on_idle.message", |c| c.events.on_idle.message = Some(String::new())),
-        ("events.on_alone.message", |c| c.events.on_alone.message = Some(String::new())),
-        ("events.on_party.message", |c| c.events.on_party.message = Some(String::new())),
+        ("events.on_idle.message", |c| {
+            c.events.on_idle.message = Some(String::new())
+        }),
+        ("events.on_alone.message", |c| {
+            c.events.on_alone.message = Some(String::new())
+        }),
+        ("events.on_party.message", |c| {
+            c.events.on_party.message = Some(String::new())
+        }),
         ("events.on_song_start.message", |c| {
             c.events.on_song_start.message = Some(String::new())
         }),
@@ -166,9 +195,15 @@ fn filled_optional_values_are_valid() {
 #[test]
 fn zero_durations_are_rejected_where_they_break_the_bot() {
     assert_each_rejected(&[
-        ("events.on_idle.delay", |c| c.events.on_idle.delay = Duration::ZERO),
-        ("events.on_alone.delay", |c| c.events.on_alone.delay = Duration::ZERO),
-        ("logging.metrics_interval", |c| c.logging.metrics_interval = Duration::ZERO),
+        ("events.on_idle.delay", |c| {
+            c.events.on_idle.delay = Duration::ZERO
+        }),
+        ("events.on_alone.delay", |c| {
+            c.events.on_alone.delay = Duration::ZERO
+        }),
+        ("logging.metrics_interval", |c| {
+            c.logging.metrics_interval = Duration::ZERO
+        }),
     ]);
 }
 

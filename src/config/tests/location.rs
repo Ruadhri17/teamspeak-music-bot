@@ -87,7 +87,11 @@ fn init_refuses_to_overwrite_existing_file() {
     let (_dir, location) = setup_with("# my config");
     let err = location.init(false).unwrap_err();
     assert!(matches!(err, ConfigError::AlreadyExists { .. }), "{err:?}");
-    assert_eq!(read(&location), "# my config", "existing file must not change");
+    assert_eq!(
+        read(&location),
+        "# my config",
+        "existing file must not change"
+    );
 }
 
 #[test]
@@ -110,7 +114,10 @@ fn init_fails_when_directory_is_missing() {
     let location = ConfigLocation::new(dir.path().join("missing/config.toml")).unwrap();
     for force in [false, true] {
         let err = location.init(force).unwrap_err();
-        assert!(matches!(err, ConfigError::Write { .. }), "force = {force}: {err:?}");
+        assert!(
+            matches!(err, ConfigError::Write { .. }),
+            "force = {force}: {err:?}"
+        );
     }
 }
 
@@ -129,11 +136,15 @@ fn load_empty_file_gives_defaults() {
 
 #[test]
 fn load_reads_values_and_keeps_other_defaults() {
-    let (_dir, location) = setup_with("[teamspeak]\nnickname = \"DJ Bot\"\n\n[audio]\nbitrate = 128\n");
+    let (_dir, location) =
+        setup_with("[teamspeak]\nnickname = \"DJ Bot\"\n\n[audio]\nbitrate = 128\n");
     let config = location.load().unwrap();
     assert_eq!(config.teamspeak.nickname, "DJ Bot");
     assert_eq!(config.audio.bitrate.get(), 128);
-    assert_eq!(config.teamspeak.address, Config::default().teamspeak.address);
+    assert_eq!(
+        config.teamspeak.address,
+        Config::default().teamspeak.address
+    );
     assert_eq!(config.audio.complexity, Config::default().audio.complexity);
 }
 
@@ -145,7 +156,10 @@ fn load_missing_file() {
         matches!(&err, ConfigError::NotFound { path } if path == location.file_path()),
         "{err:?}"
     );
-    assert!(err.to_string().contains("tsmusic init"), "hint missing: {err}");
+    assert!(
+        err.to_string().contains("tsmusic init"),
+        "hint missing: {err}"
+    );
 }
 
 #[test]
@@ -171,7 +185,11 @@ fn load_rejects_unknown_field() {
     let (_dir, location) = setup_with("[teamspeak]\nnick = \"DJ\"\n");
     let err = location.load().unwrap_err();
     assert!(matches!(err, ConfigError::Parse { .. }), "{err:?}");
-    assert!(cause(&err).contains("unknown field `nick`"), "{}", cause(&err));
+    assert!(
+        cause(&err).contains("unknown field `nick`"),
+        "{}",
+        cause(&err)
+    );
 }
 
 #[test]
@@ -194,7 +212,10 @@ fn load_reports_out_of_range_value_with_line() {
     let err = location.load().unwrap_err();
     let cause = cause(&err);
     assert!(cause.contains("line 2"), "{cause}");
-    assert!(cause.contains("bitrate must be between 32 and 192 kb/s"), "{cause}");
+    assert!(
+        cause.contains("bitrate must be between 32 and 192 kb/s"),
+        "{cause}"
+    );
 }
 
 #[test]
@@ -220,9 +241,15 @@ music_dir = "music"
     let config = location.load().unwrap();
     let base = dir.path();
     assert_eq!(config.paths.state_dir, base.join("data/state"));
-    assert_eq!(config.events.on_idle.sound, Some(base.join("sounds/bye.wav")));
+    assert_eq!(
+        config.events.on_idle.sound,
+        Some(base.join("sounds/bye.wav"))
+    );
     assert_eq!(config.events.on_alone.sound, Some(base.join("alone.wav")));
-    assert_eq!(config.events.on_party.sound, Some(base.join("sounds/hi.wav")));
+    assert_eq!(
+        config.events.on_party.sound,
+        Some(base.join("sounds/hi.wav"))
+    );
     assert_eq!(config.sources.local.music_dir, Some(base.join("music")));
 }
 
@@ -246,7 +273,10 @@ music_dir = "/srv/music"
         config.events.on_idle.sound.as_deref(),
         Some(Path::new("/usr/share/tsmusic/bye.wav"))
     );
-    assert_eq!(config.sources.local.music_dir.as_deref(), Some(Path::new("/srv/music")));
+    assert_eq!(
+        config.sources.local.music_dir.as_deref(),
+        Some(Path::new("/srv/music"))
+    );
 }
 
 #[test]
@@ -276,7 +306,10 @@ fn load_resolves_program_paths_with_directory() {
     );
     let config = location.load().unwrap();
     assert_eq!(config.paths.ffmpeg_path, dir.path().join("./bin/ffmpeg"));
-    assert_eq!(config.sources.youtube.yt_dlp_path, Path::new("/usr/local/bin/yt-dlp"));
+    assert_eq!(
+        config.sources.youtube.yt_dlp_path,
+        Path::new("/usr/local/bin/yt-dlp")
+    );
 }
 
 #[test]
@@ -284,7 +317,11 @@ fn write_atomic_replaces_content() {
     let (dir, location) = setup_with("old");
     location.write_atomic("new").unwrap();
     assert_eq!(read(&location), "new");
-    assert_eq!(files_in(dir.path()), ["config.toml"], "temp file left behind");
+    assert_eq!(
+        files_in(dir.path()),
+        ["config.toml"],
+        "temp file left behind"
+    );
 }
 
 #[test]
@@ -320,5 +357,9 @@ fn load_rejects_config_breaking_validation_rule() {
         matches!(&err, ConfigError::Invalid { path, .. } if path == location.file_path()),
         "{err:?}"
     );
-    assert!(cause(&err).contains("audio.default_volume"), "{}", cause(&err));
+    assert!(
+        cause(&err).contains("audio.default_volume"),
+        "{}",
+        cause(&err)
+    );
 }

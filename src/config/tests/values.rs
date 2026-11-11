@@ -43,7 +43,10 @@ fn bitrate_converts_back_to_number() {
 #[test]
 fn complexity_accepts_range_bounds() {
     assert_eq!(Complexity::new(0).map(Complexity::get), Some(0));
-    assert_eq!(Complexity::new(Complexity::MAX).map(Complexity::get), Some(10));
+    assert_eq!(
+        Complexity::new(Complexity::MAX).map(Complexity::get),
+        Some(10)
+    );
 }
 
 #[test]
@@ -94,15 +97,24 @@ fn volume_converts_back_to_number() {
 
 #[test]
 fn values_parse_from_toml() {
-    assert_eq!(parse::<Bitrate>("value = 96"), Ok(Bitrate::new(96).unwrap()));
-    assert_eq!(parse::<Complexity>("value = 10"), Ok(Complexity::new(10).unwrap()));
+    assert_eq!(
+        parse::<Bitrate>("value = 96"),
+        Ok(Bitrate::new(96).unwrap())
+    );
+    assert_eq!(
+        parse::<Complexity>("value = 10"),
+        Ok(Complexity::new(10).unwrap())
+    );
     assert_eq!(parse::<Volume>("value = 0"), Ok(Volume::new(0).unwrap()));
 }
 
 #[test]
 fn values_report_range_error_in_toml() {
     let err = parse::<Bitrate>("value = 500").unwrap_err();
-    assert!(err.contains("bitrate must be between 32 and 192 kb/s"), "{err}");
+    assert!(
+        err.contains("bitrate must be between 32 and 192 kb/s"),
+        "{err}"
+    );
     let err = parse::<Complexity>("value = 11").unwrap_err();
     assert!(err.contains("complexity must be between 0 and 10"), "{err}");
     let err = parse::<Volume>("value = 101").unwrap_err();
@@ -112,7 +124,10 @@ fn values_report_range_error_in_toml() {
 #[test]
 fn values_reject_negative_numbers_and_wrong_types() {
     assert!(parse::<Volume>("value = -1").is_err());
-    assert!(parse::<Volume>("value = 300").is_err(), "does not fit in u8");
+    assert!(
+        parse::<Volume>("value = 300").is_err(),
+        "does not fit in u8"
+    );
     assert!(parse::<Volume>("value = \"50\"").is_err());
     assert!(parse::<Bitrate>("value = 96.5").is_err());
 }
