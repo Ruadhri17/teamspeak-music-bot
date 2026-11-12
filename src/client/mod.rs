@@ -16,12 +16,13 @@ pub use event::{ClientEvent, ReplyTo};
 pub use request::ClientRequest;
 
 use futures::{StreamExt, future};
-use tokio::sync::mpsc;
+use tokio::{sync::mpsc, time::MissedTickBehavior};
 use tokio_util::sync::CancellationToken;
 use tracing::warn;
 use tsclientlib::{Connection, DisconnectOptions, StreamItem};
+use tsproto_packets::packets::{AudioData, CodecType, OutAudio};
 
-use crate::config::TeamspeakConfig;
+use crate::{audio::FRAME_DURATION, config::TeamspeakConfig};
 
 pub struct Client {
     connection: Connection,
@@ -29,6 +30,8 @@ pub struct Client {
     events: mpsc::Sender<ClientEvent>,
     /// From the rest of the bot.
     requests: mpsc::Receiver<ClientRequest>,
+    /// Opus packets from the audio thread, sent one per tick.
+    frames: mpsc::Receiver<Vec<u8>>,
     shutdown: CancellationToken,
 }
 
@@ -37,12 +40,14 @@ impl Client {
         config: &TeamspeakConfig,
         events: mpsc::Sender<ClientEvent>,
         requests: mpsc::Receiver<ClientRequest>,
+        frames: mpsc::Receiver<Vec<u8>>,
         shutdown: CancellationToken,
     ) -> ClientResult<Self> {
         Ok(Self {
             connection: connect::connect(config)?,
             events,
             requests,
+            frames,
             shutdown,
         })
     }
@@ -52,6 +57,9 @@ impl Client {
     /// The loop must keep polling `events()`: tsclientlib sends outgoing commands only while
     /// events are polled, so a branch that blocks for long also delays the bot's messages.
     pub async fn run(mut self) -> ClientResult<()> {
+        let mut ticker = tokio::time::interval(FRAME_DURATION);
+        ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
+
         loop {
             tokio::select! {
                 // The `async` block keeps the temporary stream alive while `next()` waits.
@@ -68,6 +76,7 @@ impl Client {
                         warn!("{:#}", anyhow::Error::from(err));
                     }
                 }
+                _ = ticker.tick() => self.send_frame(),
                 _ = self.shutdown.cancelled() => break,
             }
         }
@@ -94,6 +103,24 @@ impl Client {
                 // `Err` means the receiver is gone, so the bot is shutting down anyway.
                 let _ = self.events.send(event).await;
             }
+        }
+    }
+
+    /// Called every `FRAME_DURATION`. The clock sets the pace, the channel is only storage.
+    fn send_frame(&mut self) {
+        // Empty is the normal state when nothing plays.
+        let Ok(data) = self.frames.try_recv() else {
+            return;
+        };
+
+        let packet = OutAudio::new(&AudioData::C2S {
+            id: 0,
+            codec: CodecType::OpusMusic,
+            data: &data,
+        });
+
+        if let Err(err) = self.connection.send_audio(packet) {
+            warn!("audio could not be sent: {err}");
         }
     }
 
