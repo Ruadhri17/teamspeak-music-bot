@@ -4,7 +4,7 @@
 //! - `TrackRef`: lightweight song description in the queue (no stream URL, since URLs expire),
 //! - link detection with regexes (source and resource type), allow-list of hosts.
 
-mod local;
+pub mod local;
 mod soundcloud;
 mod spotify;
 mod tidal;
