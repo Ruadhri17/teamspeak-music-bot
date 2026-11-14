@@ -13,14 +13,14 @@ mod presence;
 mod secrets;
 mod sources;
 
-use std::{fs::File, path::PathBuf, time::Duration};
+use std::time::Duration;
 
 use clap::Parser;
 
-use audio::AudioInput;
 use cli::{Cli, Command};
-use client::{Client, ClientEvent, ClientRequest};
-use config::{AudioConfig, ConfigLocation, LogLevel};
+use client::Client;
+use config::{ConfigLocation, LogLevel};
+use player::Player;
 use tokio::{
     signal::unix::{SignalKind, signal},
     sync::mpsc,
@@ -28,7 +28,6 @@ use tokio::{
 use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
 
-/// Returning `Err` prints it with all causes ("Caused by:") and exits with code 1.
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
@@ -67,13 +66,16 @@ async fn run(location: &ConfigLocation, log_level: Option<LogLevel>) -> anyhow::
         shutdown.clone(),
     )?;
     let mut client = tokio::spawn(client.run());
-    tokio::spawn(ping(
+    let player = Player::new(
         events_rx,
         requests_tx,
         frames_tx,
         config.paths.ffmpeg_path.clone(),
         config.audio.clone(),
-    ));
+        config.sources.clone(),
+    );
+    // Ends on its own when the client is gone and the events channel closes.
+    tokio::spawn(player.run());
 
     tokio::select! {
         _ = sigint.recv() => info!("SIGINT received, shutting down"),
@@ -93,65 +95,4 @@ async fn run(location: &ConfigLocation, log_level: Option<LogLevel>) -> anyhow::
     }
 
     Ok(())
-}
-
-/// Temporary stand-in for commands and the player: `!bot ping` checks both channels,
-/// `!bot play <path>` plays a local file.
-// TODO: remove once `commands` and the player handle messages.
-async fn ping(
-    mut events: mpsc::Receiver<ClientEvent>,
-    requests: mpsc::Sender<ClientRequest>,
-    frames: mpsc::Sender<Vec<u8>>,
-    ffmpeg_path: PathBuf,
-    audio: AudioConfig,
-) {
-    // Cancelled when the next `!bot play` replaces the current track.
-    let mut stop = CancellationToken::new();
-
-    while let Some(event) = events.recv().await {
-        let ClientEvent::Message {
-            reply_to,
-            sender_name,
-            text,
-        } = event;
-        let text = text.trim();
-
-        let answer = if text == "!bot ping" {
-            info!("ping from {sender_name}");
-            "pong".to_string()
-        } else if let Some(path) = text.strip_prefix("!bot play ") {
-            // TODO: any path on the host can be played from the chat, this must never reach
-            //   the VPS. `sources/local` will only accept files inside `music_dir`.
-            match File::open(path.trim()) {
-                Ok(file) => {
-                    info!("{sender_name} plays {path}");
-                    // The old thread stops at its next frame, frames already buffered still play.
-                    stop.cancel();
-                    stop = CancellationToken::new();
-                    let input: AudioInput = Box::new(file);
-                    audio::play(
-                        ffmpeg_path.clone(),
-                        input,
-                        &audio,
-                        frames.clone(),
-                        stop.clone(),
-                    );
-                    // Success needs no answer, every chat message notifies the whole channel.
-                    continue;
-                }
-                Err(err) => format!("cannot open {path}: {err}"),
-            }
-        } else {
-            continue;
-        };
-
-        let reply = ClientRequest::SendMessage {
-            to: reply_to,
-            text: answer,
-        };
-        // `Err` means the client is gone, so there is nobody left to answer.
-        if requests.send(reply).await.is_err() {
-            break;
-        }
-    }
 }

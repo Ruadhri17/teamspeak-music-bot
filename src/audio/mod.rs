@@ -26,13 +26,16 @@ pub const FRAME_SAMPLES: usize = SAMPLES_PER_CHANNEL * CHANNELS;
 pub type AudioInput = Box<dyn Read + Send>;
 
 /// Plays `input` on a new thread, pushing Opus packets into `frames` until the track ends,
-/// `stop` is cancelled or the receiver is gone.
+/// `stop` is cancelled or the receiver is gone. Then the thread calls `on_done`.
+///
+/// `on_done` is a callback, so this module does not need to know who listens or why.
 pub fn play(
     ffmpeg_path: PathBuf,
     input: AudioInput,
     audio: &AudioConfig,
     frames: mpsc::Sender<Vec<u8>>,
     stop: CancellationToken,
+    on_done: impl FnOnce() + Send + 'static,
 ) -> JoinHandle<()> {
     let (bitrate, complexity) = (audio.bitrate, audio.complexity);
 
@@ -49,6 +52,7 @@ pub fn play(
                 break;
             }
         }
+        on_done();
     })
 }
 
