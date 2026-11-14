@@ -9,3 +9,14 @@ mod soundcloud;
 mod spotify;
 mod tidal;
 mod youtube;
+
+/// What a search phrase looks for. A link carries its own type, so this only applies to phrases.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum SearchKind {
+    #[default]
+    Track,
+    /// The whole album, in its original order.
+    Album,
+    /// A public playlist, in its original order.
+    Playlist,
+}
