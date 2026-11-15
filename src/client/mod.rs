@@ -16,7 +16,10 @@ pub use event::{ClientEvent, ReplyTo};
 pub use request::ClientRequest;
 
 use futures::{StreamExt, future};
-use tokio::{sync::mpsc, time::MissedTickBehavior};
+use tokio::{
+    sync::{mpsc, watch},
+    time::MissedTickBehavior,
+};
 use tokio_util::sync::CancellationToken;
 use tracing::warn;
 use tsclientlib::{Connection, DisconnectOptions, StreamItem};
@@ -32,6 +35,9 @@ pub struct Client {
     requests: mpsc::Receiver<ClientRequest>,
     /// Opus packets from the audio thread, sent one per tick.
     frames: mpsc::Receiver<Vec<u8>>,
+    /// While `true`, frames stay in the channel, so the audio thread waits on the full buffer
+    /// and resumes exactly where it stopped.
+    paused: watch::Receiver<bool>,
     shutdown: CancellationToken,
 }
 
@@ -41,6 +47,7 @@ impl Client {
         events: mpsc::Sender<ClientEvent>,
         requests: mpsc::Receiver<ClientRequest>,
         frames: mpsc::Receiver<Vec<u8>>,
+        paused: watch::Receiver<bool>,
         shutdown: CancellationToken,
     ) -> ClientResult<Self> {
         Ok(Self {
@@ -48,6 +55,7 @@ impl Client {
             events,
             requests,
             frames,
+            paused,
             shutdown,
         })
     }
@@ -108,6 +116,10 @@ impl Client {
 
     /// Called every `FRAME_DURATION`. The clock sets the pace, the channel is only storage.
     fn send_frame(&mut self) {
+        // `borrow()` holds a read lock, the deref copies the bool and drops it right away.
+        if *self.paused.borrow() {
+            return;
+        }
         // Empty is the normal state when nothing plays.
         let Ok(data) = self.frames.try_recv() else {
             return;

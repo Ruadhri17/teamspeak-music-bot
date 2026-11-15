@@ -23,7 +23,7 @@ use config::{ConfigLocation, LogLevel};
 use player::Player;
 use tokio::{
     signal::unix::{SignalKind, signal},
-    sync::mpsc,
+    sync::{mpsc, watch},
 };
 use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
@@ -58,11 +58,16 @@ async fn run(location: &ConfigLocation, log_level: Option<LogLevel>) -> anyhow::
     let (events_tx, events_rx) = mpsc::channel(64);
     let (requests_tx, requests_rx) = mpsc::channel(64);
     let (frames_tx, frames_rx) = mpsc::channel(250);
+
+    // State, not events: the player sets it, the client reads the latest value every tick.
+    let (paused_tx, paused_rx) = watch::channel(false);
+
     let client = Client::new(
         &config.teamspeak,
         events_tx,
         requests_rx,
         frames_rx,
+        paused_rx,
         shutdown.clone(),
     )?;
     let mut client = tokio::spawn(client.run());
@@ -70,6 +75,7 @@ async fn run(location: &ConfigLocation, log_level: Option<LogLevel>) -> anyhow::
         events_rx,
         requests_tx,
         frames_tx,
+        paused_tx,
         config.paths.ffmpeg_path.clone(),
         config.audio.clone(),
         config.sources.clone(),

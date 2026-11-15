@@ -2,40 +2,27 @@
 //!
 //! Every playback has a `PlaybackId` and a `CancellationToken`. Results with a stale ID are dropped.
 //! Handles `!song ...` and `!queue ...` commands.
+//!
+//! Split like `commands`, one file per command namespace:
+//! - `mod.rs`: the actor loop, dispatching commands and chat replies
+//! - `state`: `State` and `PlaybackId`
+//! - `song`: `!song ...` and the playback transitions (start, stop, finish)
+//! - `queue`: `!queue ...` and the song queue as a plain data structure
 
 mod queue;
+mod song;
+mod state;
 
 use std::path::PathBuf;
 
-use tokio::sync::mpsc;
-use tokio_util::sync::CancellationToken;
+use tokio::sync::{mpsc, watch};
 
 use crate::{
-    audio,
     client::{ClientEvent, ClientRequest, ReplyTo},
     commands::Command,
-    config::{AudioConfig, SourceKind, SourcesConfig},
-    sources::local,
+    config::{AudioConfig, SourcesConfig},
 };
-
-/// Identifies one playback, so a late "finished" from an old track can be told apart.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct PlaybackId(u64);
-
-/// The token and ID live inside the states that have a track, so `Idle` cannot hold a stale one.
-// TODO: `Loading` for Tidal, `Departing` for presence.
-#[derive(Debug)]
-enum State {
-    Idle,
-    Playing {
-        id: PlaybackId,
-        stop: CancellationToken,
-    },
-    Paused {
-        id: PlaybackId,
-        stop: CancellationToken,
-    },
-}
+use state::{PlaybackId, State};
 
 pub struct Player {
     state: State,
@@ -47,6 +34,8 @@ pub struct Player {
     requests: mpsc::Sender<ClientRequest>,
     /// Handed to every audio thread.
     frames: mpsc::Sender<Vec<u8>>,
+    /// Tells the client to hold the frames, the audio thread then waits on the full buffer.
+    paused: watch::Sender<bool>,
     /// Audio threads send their ID here when the track ends.
     done_tx: mpsc::Sender<PlaybackId>,
     done_rx: mpsc::Receiver<PlaybackId>,
@@ -60,6 +49,7 @@ impl Player {
         events: mpsc::Receiver<ClientEvent>,
         requests: mpsc::Sender<ClientRequest>,
         frames: mpsc::Sender<Vec<u8>>,
+        paused: watch::Sender<bool>,
         ffmpeg_path: PathBuf,
         audio: AudioConfig,
         sources: SourcesConfig,
@@ -72,19 +62,13 @@ impl Player {
             events,
             requests,
             frames,
+            paused,
             done_tx,
             done_rx,
             ffmpeg_path,
             audio,
             sources,
         }
-    }
-
-    /// Takes the next ID, so no two playbacks ever share one.
-    fn new_id(&mut self) -> PlaybackId {
-        let id = PlaybackId(self.next_id);
-        self.next_id += 1;
-        id
     }
 
     pub async fn run(mut self) {
@@ -108,6 +92,8 @@ impl Player {
                     self.reply(reply_to, message).await;
                 }
             }
+            Some(Ok(Command::Pause)) => self.pause(),
+            Some(Ok(Command::Resume)) => self.resume(),
             Some(Ok(Command::Ping)) => self.reply(reply_to, "pong".into()).await,
             Some(Err(err)) => self.reply(reply_to, err.to_string()).await,
             // Normal chat and commands not handled yet.
@@ -116,64 +102,9 @@ impl Player {
         }
     }
 
-    /// `Err` is the message for the chat.
-    fn add(&mut self, query: &str, source: Option<SourceKind>) -> Result<(), String> {
-        let input = match source.unwrap_or(self.sources.default) {
-            SourceKind::Tidal => todo!(),
-            SourceKind::Spotify => todo!(),
-            SourceKind::Youtube => todo!(),
-            SourceKind::Soundcloud => todo!(),
-            SourceKind::Local => {
-                // `None` when the local source is disabled in the config.
-                let Some(music_dir) = &self.sources.local.music_dir else {
-                    return Err("the local source is disabled".into());
-                };
-                // Opened before stopping, so a wrong path leaves the current track playing.
-                local::open(music_dir, query).map_err(|err| err.to_string())?
-            }
-        };
-
-        // TODO: append to the queue instead of replacing the current track.
-        self.stop_current();
-        let id = self.new_id();
-        let stop = CancellationToken::new();
-        let done = self.done_tx.clone();
-        audio::play(
-            self.ffmpeg_path.clone(),
-            input,
-            &self.audio,
-            self.frames.clone(),
-            stop.clone(),
-            // `Err` means the player is gone, nobody waits for the answer.
-            move || {
-                let _ = done.blocking_send(id);
-            },
-        );
-        self.state = State::Playing { id, stop };
-        Ok(())
-    }
-
     async fn reply(&self, to: ReplyTo, text: String) {
         let request = ClientRequest::SendMessage { to, text };
         // `Err` means the client is gone, so there is nobody to answer.
         let _ = self.requests.send(request).await;
-    }
-
-    /// Stops the current track, if any, and leaves the player idle.
-    fn stop_current(&mut self) {
-        if let State::Playing { stop, .. } | State::Paused { stop, .. } = &self.state {
-            stop.cancel();
-        }
-        self.state = State::Idle;
-    }
-
-    /// A track ended on its own or after `stop`. Only the current one changes the state.
-    fn finished(&mut self, id: PlaybackId) {
-        // A stale ID means this track was already replaced, nothing to do.
-        if let State::Playing { id: current, .. } = self.state
-            && current == id
-        {
-            self.state = State::Idle;
-        }
     }
 }
