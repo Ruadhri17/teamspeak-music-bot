@@ -25,15 +25,24 @@ pub const FRAME_SAMPLES: usize = SAMPLES_PER_CHANNEL * CHANNELS;
 /// Audio data from any source
 pub type AudioInput = Box<dyn Read + Send>;
 
-/// Plays `input` on a new thread, pushing Opus packets into `frames` until the track ends,
-/// `stop` is cancelled or the receiver is gone. Then the thread calls `on_done`.
+/// One Opus packet, tagged with the playback it belongs to,
+/// so the client can drop the frames of a stopped track still waiting in the channel.
+#[derive(Debug)]
+pub struct Frame {
+    pub stream: u64,
+    pub data: Vec<u8>,
+}
+
+/// Plays `input` on a new thread, pushing Opus packets tagged with `stream` into `frames`
+/// until the track ends, `stop` is cancelled or the receiver is gone. Then the thread calls `on_done`.
 ///
 /// `on_done` is a callback, so this module does not need to know who listens or why.
 pub fn play(
     ffmpeg_path: PathBuf,
     input: AudioInput,
     audio: &AudioConfig,
-    frames: mpsc::Sender<Vec<u8>>,
+    stream: u64,
+    frames: mpsc::Sender<Frame>,
     stop: CancellationToken,
     on_done: impl FnOnce() + Send + 'static,
 ) -> JoinHandle<()> {
@@ -46,9 +55,9 @@ pub fn play(
             if stop.is_cancelled() {
                 break;
             }
-            let packet = encoder.encode(&frame).unwrap();
+            let data = encoder.encode(&frame).unwrap();
             // Waits while the buffer is full, `Err` means the client is gone.
-            if frames.blocking_send(packet).is_err() {
+            if frames.blocking_send(Frame { stream, data }).is_err() {
                 break;
             }
         }

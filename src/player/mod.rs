@@ -13,19 +13,25 @@ mod queue;
 mod song;
 mod state;
 
-use std::path::PathBuf;
+use std::{num::NonZeroUsize, path::PathBuf};
 
 use tokio::sync::{mpsc, watch};
 
 use crate::{
-    client::{ClientEvent, ClientRequest, ReplyTo},
+    audio::Frame,
+    client::{AudioControl, ClientEvent, ClientRequest, ReplyTo},
     commands::Command,
-    config::{AudioConfig, SourcesConfig},
+    config::{AudioConfig, Config, SourcesConfig},
 };
+use queue::Queue;
 use state::{PlaybackId, State};
 
 pub struct Player {
     state: State,
+    /// Songs after the current one.
+    queue: Queue,
+    /// Entries per page in `!queue show`.
+    page_size: NonZeroUsize,
     /// The ID for the next playback, only ever goes up.
     next_id: u64,
     /// Chat messages from the client, the source of commands.
@@ -33,9 +39,9 @@ pub struct Player {
     /// Error replies to the chat.
     requests: mpsc::Sender<ClientRequest>,
     /// Handed to every audio thread.
-    frames: mpsc::Sender<Vec<u8>>,
-    /// Tells the client to hold the frames, the audio thread then waits on the full buffer.
-    paused: watch::Sender<bool>,
+    frames: mpsc::Sender<Frame>,
+    /// Tells the client to hold the frames (pause) or drop a stopped track's frames.
+    control: watch::Sender<AudioControl>,
     /// Audio threads send their ID here when the track ends.
     done_tx: mpsc::Sender<PlaybackId>,
     done_rx: mpsc::Receiver<PlaybackId>,
@@ -48,26 +54,26 @@ impl Player {
     pub fn new(
         events: mpsc::Receiver<ClientEvent>,
         requests: mpsc::Sender<ClientRequest>,
-        frames: mpsc::Sender<Vec<u8>>,
-        paused: watch::Sender<bool>,
-        ffmpeg_path: PathBuf,
-        audio: AudioConfig,
-        sources: SourcesConfig,
+        frames: mpsc::Sender<Frame>,
+        control: watch::Sender<AudioControl>,
+        config: &Config,
     ) -> Self {
         // One message per finished track, a few slots are plenty.
         let (done_tx, done_rx) = mpsc::channel(8);
         Self {
             state: State::Idle,
+            queue: Queue::new(config.queue.max_len),
+            page_size: config.queue.show_page_size,
             next_id: 0,
             events,
             requests,
             frames,
-            paused,
+            control,
             done_tx,
             done_rx,
-            ffmpeg_path,
-            audio,
-            sources,
+            ffmpeg_path: config.paths.ffmpeg_path.clone(),
+            audio: config.audio.clone(),
+            sources: config.sources.clone(),
         }
     }
 
@@ -86,19 +92,48 @@ impl Player {
     async fn handle_event(&mut self, event: ClientEvent) {
         let ClientEvent::Message { reply_to, text, .. } = event;
 
-        match Command::parse(&text) {
-            Some(Ok(Command::Add { query, source, .. })) => {
-                if let Err(message) = self.add(&query, source) {
-                    self.reply(reply_to, message).await;
-                }
+        // `None`: normal chat, the bot stays silent.
+        let Some(parsed) = Command::parse(&text) else {
+            return;
+        };
+        let reply = match parsed {
+            Ok(command) => self.execute(command),
+            Err(err) => Some(err.to_string()),
+        };
+        if let Some(text) = reply {
+            self.reply(reply_to, text).await;
+        }
+    }
+
+    /// Returns the chat reply, if the command needs one. Success is silent, except for
+    /// informational commands. Sync, so the actor's state changes never wait on anything.
+    fn execute(&mut self, command: Command) -> Option<String> {
+        match command {
+            Command::Add { query, source, .. } => self.add(&query, source).err(),
+            Command::Pause => {
+                self.pause();
+                None
             }
-            Some(Ok(Command::Pause)) => self.pause(),
-            Some(Ok(Command::Resume)) => self.resume(),
-            Some(Ok(Command::Ping)) => self.reply(reply_to, "pong".into()).await,
-            Some(Err(err)) => self.reply(reply_to, err.to_string()).await,
-            // Normal chat and commands not handled yet.
-            // TODO: the rest of !song and !queue.
-            Some(Ok(_)) | None => {}
+            Command::Resume => self.resume().err(),
+            Command::Next => {
+                self.next();
+                None
+            }
+            Command::Current => Some(self.current()),
+            Command::QueueShow { page } => Some(self.queue_show(page)),
+            Command::QueueRemove { position } => self.queue_remove(position).err(),
+            Command::QueueClear => {
+                self.queue_clear();
+                None
+            }
+            Command::Ping => Some("pong".to_string()),
+            // Listed one by one, so a new command does not compile until it is handled somewhere.
+            // TODO: `!bot summon` belongs to presence, `!bot config` to the config handler.
+            Command::Summon
+            | Command::ConfigList { .. }
+            | Command::ConfigGet { .. }
+            | Command::ConfigSet { .. }
+            | Command::ConfigReload => None,
         }
     }
 
@@ -108,3 +143,6 @@ impl Player {
         let _ = self.requests.send(request).await;
     }
 }
+
+#[cfg(test)]
+mod tests;

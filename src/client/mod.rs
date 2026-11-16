@@ -25,7 +25,22 @@ use tracing::warn;
 use tsclientlib::{Connection, DisconnectOptions, StreamItem};
 use tsproto_packets::packets::{AudioData, CodecType, OutAudio};
 
-use crate::{audio::FRAME_DURATION, config::TeamspeakConfig};
+use crate::{
+    audio::{FRAME_DURATION, Frame},
+    config::TeamspeakConfig,
+};
+
+/// What the client sends right now. Set by the player, read every tick.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct AudioControl {
+    /// Frames of streams below this are dropped. Raised on a stop (`!song next`, `!queue clear`),
+    /// so the old track goes silent at once. A track that ends on its own keeps its buffered end,
+    /// and the next one follows without a gap.
+    pub drop_before: u64,
+    /// While `true`, frames stay in the channel, so the audio thread waits on the full buffer
+    /// and resumes exactly where it stopped.
+    pub paused: bool,
+}
 
 pub struct Client {
     connection: Connection,
@@ -34,10 +49,10 @@ pub struct Client {
     /// From the rest of the bot.
     requests: mpsc::Receiver<ClientRequest>,
     /// Opus packets from the audio thread, sent one per tick.
-    frames: mpsc::Receiver<Vec<u8>>,
-    /// While `true`, frames stay in the channel, so the audio thread waits on the full buffer
-    /// and resumes exactly where it stopped.
-    paused: watch::Receiver<bool>,
+    frames: mpsc::Receiver<Frame>,
+    control: watch::Receiver<AudioControl>,
+    /// A frame went out on the last tick, so a stop must be followed by an end-of-speech packet.
+    talking: bool,
     shutdown: CancellationToken,
 }
 
@@ -46,8 +61,8 @@ impl Client {
         config: &TeamspeakConfig,
         events: mpsc::Sender<ClientEvent>,
         requests: mpsc::Receiver<ClientRequest>,
-        frames: mpsc::Receiver<Vec<u8>>,
-        paused: watch::Receiver<bool>,
+        frames: mpsc::Receiver<Frame>,
+        control: watch::Receiver<AudioControl>,
         shutdown: CancellationToken,
     ) -> ClientResult<Self> {
         Ok(Self {
@@ -55,7 +70,8 @@ impl Client {
             events,
             requests,
             frames,
-            paused,
+            control,
+            talking: false,
             shutdown,
         })
     }
@@ -116,21 +132,47 @@ impl Client {
 
     /// Called every `FRAME_DURATION`. The clock sets the pace, the channel is only storage.
     fn send_frame(&mut self) {
-        // `borrow()` holds a read lock, the deref copies the bool and drops it right away.
-        if *self.paused.borrow() {
+        // `borrow()` holds a read lock, the deref copies the control and drops it right away.
+        let control = *self.control.borrow();
+        if control.paused {
+            self.end_speech();
             return;
         }
-        // Empty is the normal state when nothing plays.
-        let Ok(data) = self.frames.try_recv() else {
-            return;
-        };
 
+        // Drops the frames of stopped streams in one go, so a stop is silent at once.
+        loop {
+            match self.frames.try_recv() {
+                Ok(frame) if frame.stream < control.drop_before => continue,
+                Ok(frame) => {
+                    self.send_audio(&frame.data);
+                    self.talking = true;
+                    return;
+                }
+                // Empty is the normal state when nothing plays.
+                Err(_) => {
+                    self.end_speech();
+                    return;
+                }
+            }
+        }
+    }
+
+    /// Without it the listeners' decoders treat the missing packets as network loss
+    /// and play a short garbled guess of the last frames.
+    fn end_speech(&mut self) {
+        if self.talking {
+            // An empty packet ends the voice stream (tsclientlib docs of `send_audio`).
+            self.send_audio(&[]);
+            self.talking = false;
+        }
+    }
+
+    fn send_audio(&mut self, data: &[u8]) {
         let packet = OutAudio::new(&AudioData::C2S {
             id: 0,
             codec: CodecType::OpusMusic,
-            data: &data,
+            data,
         });
-
         if let Err(err) = self.connection.send_audio(packet) {
             warn!("audio could not be sent: {err}");
         }

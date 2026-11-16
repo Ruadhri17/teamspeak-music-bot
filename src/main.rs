@@ -18,7 +18,7 @@ use std::time::Duration;
 use clap::Parser;
 
 use cli::{Cli, Command};
-use client::Client;
+use client::{AudioControl, Client};
 use config::{ConfigLocation, LogLevel};
 use player::Player;
 use tokio::{
@@ -60,26 +60,18 @@ async fn run(location: &ConfigLocation, log_level: Option<LogLevel>) -> anyhow::
     let (frames_tx, frames_rx) = mpsc::channel(250);
 
     // State, not events: the player sets it, the client reads the latest value every tick.
-    let (paused_tx, paused_rx) = watch::channel(false);
+    let (control_tx, control_rx) = watch::channel(AudioControl::default());
 
     let client = Client::new(
         &config.teamspeak,
         events_tx,
         requests_rx,
         frames_rx,
-        paused_rx,
+        control_rx,
         shutdown.clone(),
     )?;
     let mut client = tokio::spawn(client.run());
-    let player = Player::new(
-        events_rx,
-        requests_tx,
-        frames_tx,
-        paused_tx,
-        config.paths.ffmpeg_path.clone(),
-        config.audio.clone(),
-        config.sources.clone(),
-    );
+    let player = Player::new(events_rx, requests_tx, frames_tx, control_tx, &config);
     // Ends on its own when the client is gone and the events channel closes.
     tokio::spawn(player.run());
 
