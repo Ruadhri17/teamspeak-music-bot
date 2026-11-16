@@ -20,7 +20,7 @@ use clap::Parser;
 use cli::{Cli, Command};
 use client::{AudioControl, Client};
 use config::{ConfigLocation, LogLevel};
-use player::Player;
+use player::{AudioLauncher, Player};
 use tokio::{
     signal::unix::{SignalKind, signal},
     sync::{mpsc, watch},
@@ -59,7 +59,6 @@ async fn run(location: &ConfigLocation, log_level: Option<LogLevel>) -> anyhow::
     let (requests_tx, requests_rx) = mpsc::channel(64);
     let (frames_tx, frames_rx) = mpsc::channel(250);
 
-    // State, not events: the player sets it, the client reads the latest value every tick.
     let (control_tx, control_rx) = watch::channel(AudioControl::default());
 
     let client = Client::new(
@@ -71,8 +70,9 @@ async fn run(location: &ConfigLocation, log_level: Option<LogLevel>) -> anyhow::
         shutdown.clone(),
     )?;
     let mut client = tokio::spawn(client.run());
-    let player = Player::new(events_rx, requests_tx, frames_tx, control_tx, &config);
-    // Ends on its own when the client is gone and the events channel closes.
+    let launcher = Box::new(AudioLauncher::new(&config, frames_tx));
+    let player = Player::new(events_rx, requests_tx, control_tx, launcher, &config);
+    // Not awaited, the player stops when the client exits and the events channel closes.
     tokio::spawn(player.run());
 
     tokio::select! {

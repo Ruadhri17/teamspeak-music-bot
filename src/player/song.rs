@@ -1,6 +1,5 @@
-//! `!song ...` commands and the playback transitions they share with `queue`:
-//! starting, stopping and finishing tracks. Everything that touches the state,
-//! its token and its ID lives here.
+//! `!song ...` commands and the playback transitions shared with `queue`:
+//! starting, stopping and finishing tracks.
 
 use std::mem;
 
@@ -12,7 +11,7 @@ use super::{
     state::{Playback, PlaybackId, State},
 };
 use crate::{
-    audio::{self, AudioInput},
+    audio::AudioInput,
     config::SourceKind,
     sources::{Location, TrackRef, local},
 };
@@ -30,11 +29,7 @@ impl Player {
     }
 
     /// `!song pause`. Pauses a playing track, otherwise does nothing.
-    /// The client holds the frames, so the audio thread waits on the full buffer
-    /// and the track resumes exactly where it stopped.
     pub(super) fn pause(&mut self) {
-        // `take` moves the state out (leaving `Idle`), so the playback moves into
-        // the new state as a whole, without cloning.
         self.state = match mem::take(&mut self.state) {
             State::Playing(playback) => {
                 self.control.send_modify(|control| control.paused = true);
@@ -45,8 +40,8 @@ impl Player {
     }
 
     /// `!song resume`. Resumes a paused track, or starts the queue when idle.
-    /// Unpauses the client even without a paused track, since a paused track may have
-    /// finished decoding and gone `Idle` with its last frames still buffered.
+    /// Unpauses the client even when idle, a track that finished while paused
+    /// may still have frames in the buffer.
     pub(super) fn resume(&mut self) -> Result<(), String> {
         self.control.send_modify(|control| control.paused = false);
         self.state = match mem::take(&mut self.state) {
@@ -63,13 +58,13 @@ impl Player {
         Ok(())
     }
 
-    /// `!song next`. Starts the next track, or just stops when the queue is empty.
+    /// `!song next`. Starts the next track, or stops playback when the queue is empty.
     pub(super) fn next(&mut self) {
         self.stop_current();
         self.play_next();
     }
 
-    /// `!song current`. Always answers, it is an informational command.
+    /// `!song current`. Always replies (informational command).
     // TODO: artist, source and position in time, once sources give that.
     pub(super) fn current(&self) -> String {
         match &self.state {
@@ -79,9 +74,7 @@ impl Player {
         }
     }
 
-    /// Stops the current track at once and leaves the player idle.
-    /// Every stream started so far is dropped, including its frames still in the buffer,
-    /// and the client is unpaused, so the next track is heard right away.
+    /// Stops the current track at once, drops its buffered frames and unpauses the client.
     pub(super) fn stop_current(&mut self) {
         if let Some(playback) = self.state.playback() {
             playback.stop.cancel();
@@ -95,18 +88,16 @@ impl Player {
         self.state = State::Idle;
     }
 
-    /// A track finished decoding (its end may still be in the buffer).
-    /// Only the current one changes the state.
+    /// A track finished decoding, its end may still be in the buffer.
+    /// Stale IDs are ignored.
     pub(super) fn finished(&mut self, id: PlaybackId) {
-        // A stale ID means this track was already replaced, nothing to do.
         match &self.state {
-            // Not `stop_current`: the buffered end must still play, the next track follows it.
+            // `stop_current` is not used, the buffered end must play before the next track.
             State::Playing(playback) if playback.id == id => {
                 self.state = State::Idle;
                 self.play_next();
             }
-            // Going on would undo the pause, so the player waits idle,
-            // and `!song resume` plays the buffered end and then the queue.
+            // Advancing would cancel the pause, playback continues on `!song resume`.
             State::Paused(playback) if playback.id == id => self.state = State::Idle,
             _ => {}
         }
@@ -121,32 +112,28 @@ impl Player {
                     self.start(input, track);
                     return;
                 }
-                // Nobody waits for an answer here (the track may start long after `!song add`),
-                // so it is only logged.
+                // Only logged, there is no command to reply to.
                 // TODO: tell the chat once unavailable Tidal tracks show up here.
                 Err(err) => warn!("skipping {}: {err}", track.title),
             }
         }
     }
 
-    /// Starts `input` on a new audio thread. The player must be idle.
+    /// Starts `input` through the launcher. The player must be idle.
     fn start(&mut self, input: AudioInput, track: TrackRef) {
         let id = self.new_id();
         let stop = CancellationToken::new();
         let done = self.done_tx.clone();
-        // A track that finished while paused leaves the client paused, a new one must be heard.
+        // A track that finished while paused leaves the client paused, unpause for the new one.
         self.control.send_modify(|control| control.paused = false);
-        audio::play(
-            self.ffmpeg_path.clone(),
+        self.launcher.launch(
             input,
-            &self.audio,
             id.0,
-            self.frames.clone(),
             stop.clone(),
-            // `Err` means the player is gone, nobody waits for the answer.
-            move || {
+            // `Err` means the player has stopped, the notification is dropped.
+            Box::new(move || {
                 let _ = done.blocking_send(id);
-            },
+            }),
         );
         self.state = State::Playing(Playback { id, stop, track });
     }
@@ -184,7 +171,7 @@ impl Player {
             .ok_or_else(|| "the local source is disabled".to_string())
     }
 
-    /// Takes the next ID, so no two playbacks ever share one.
+    /// Takes the next ID.
     fn new_id(&mut self) -> PlaybackId {
         let id = PlaybackId(self.next_id);
         self.next_id += 1;

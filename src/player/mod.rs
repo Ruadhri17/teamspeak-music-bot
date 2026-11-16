@@ -5,23 +5,26 @@
 //!
 //! Split like `commands`, one file per command namespace:
 //! - `mod.rs`: the actor loop, dispatching commands and chat replies
+//! - `launcher`: `Launcher`, the interface to the audio thread
 //! - `state`: `State` and `PlaybackId`
 //! - `song`: `!song ...` and the playback transitions (start, stop, finish)
 //! - `queue`: `!queue ...` and the song queue as a plain data structure
 
+mod launcher;
 mod queue;
 mod song;
 mod state;
 
-use std::{num::NonZeroUsize, path::PathBuf};
+pub use launcher::{AudioLauncher, Launcher};
+
+use std::num::NonZeroUsize;
 
 use tokio::sync::{mpsc, watch};
 
 use crate::{
-    audio::Frame,
     client::{AudioControl, ClientEvent, ClientRequest, ReplyTo},
     commands::Command,
-    config::{AudioConfig, Config, SourcesConfig},
+    config::{Config, SourcesConfig},
 };
 use queue::Queue;
 use state::{PlaybackId, State};
@@ -38,15 +41,13 @@ pub struct Player {
     events: mpsc::Receiver<ClientEvent>,
     /// Error replies to the chat.
     requests: mpsc::Sender<ClientRequest>,
-    /// Handed to every audio thread.
-    frames: mpsc::Sender<Frame>,
+    /// Starts the audio of a track, `AudioLauncher` outside of tests.
+    launcher: Box<dyn Launcher>,
     /// Tells the client to hold the frames (pause) or drop a stopped track's frames.
     control: watch::Sender<AudioControl>,
     /// Audio threads send their ID here when the track ends.
     done_tx: mpsc::Sender<PlaybackId>,
     done_rx: mpsc::Receiver<PlaybackId>,
-    ffmpeg_path: PathBuf,
-    audio: AudioConfig,
     sources: SourcesConfig,
 }
 
@@ -54,11 +55,10 @@ impl Player {
     pub fn new(
         events: mpsc::Receiver<ClientEvent>,
         requests: mpsc::Sender<ClientRequest>,
-        frames: mpsc::Sender<Frame>,
         control: watch::Sender<AudioControl>,
+        launcher: Box<dyn Launcher>,
         config: &Config,
     ) -> Self {
-        // One message per finished track, a few slots are plenty.
         let (done_tx, done_rx) = mpsc::channel(8);
         Self {
             state: State::Idle,
@@ -67,12 +67,10 @@ impl Player {
             next_id: 0,
             events,
             requests,
-            frames,
+            launcher,
             control,
             done_tx,
             done_rx,
-            ffmpeg_path: config.paths.ffmpeg_path.clone(),
-            audio: config.audio.clone(),
             sources: config.sources.clone(),
         }
     }
@@ -92,7 +90,6 @@ impl Player {
     async fn handle_event(&mut self, event: ClientEvent) {
         let ClientEvent::Message { reply_to, text, .. } = event;
 
-        // `None`: normal chat, the bot stays silent.
         let Some(parsed) = Command::parse(&text) else {
             return;
         };
@@ -105,8 +102,8 @@ impl Player {
         }
     }
 
-    /// Returns the chat reply, if the command needs one. Success is silent, except for
-    /// informational commands. Sync, so the actor's state changes never wait on anything.
+    /// Runs a command and returns the chat reply, if any.
+    /// Success is silent, except for informational commands.
     fn execute(&mut self, command: Command) -> Option<String> {
         match command {
             Command::Add { query, source, .. } => self.add(&query, source).err(),
@@ -127,7 +124,7 @@ impl Player {
                 None
             }
             Command::Ping => Some("pong".to_string()),
-            // Listed one by one, so a new command does not compile until it is handled somewhere.
+            // Listed one by one, so a new command does not compile until it is handled.
             // TODO: `!bot summon` belongs to presence, `!bot config` to the config handler.
             Command::Summon
             | Command::ConfigList { .. }
@@ -139,7 +136,7 @@ impl Player {
 
     async fn reply(&self, to: ReplyTo, text: String) {
         let request = ClientRequest::SendMessage { to, text };
-        // `Err` means the client is gone, so there is nobody to answer.
+        // `Err` means the client has stopped, the reply is dropped.
         let _ = self.requests.send(request).await;
     }
 }
