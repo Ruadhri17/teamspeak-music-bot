@@ -15,6 +15,8 @@ pub use error::{ClientError, ClientResult};
 pub use event::{ClientEvent, ReplyTo};
 pub use request::ClientRequest;
 
+use std::path::PathBuf;
+
 use futures::{StreamExt, future};
 use tokio::{
     sync::{mpsc, watch},
@@ -27,7 +29,8 @@ use tsproto_packets::packets::{AudioData, CodecType, OutAudio};
 
 use crate::{
     audio::{FRAME_DURATION, Frame},
-    config::TeamspeakConfig,
+    config::Config,
+    secrets::{TeamspeakSecrets, identity},
 };
 
 /// What the client sends right now. Set by the player, read every tick.
@@ -50,25 +53,32 @@ pub struct Client {
     control: watch::Receiver<AudioControl>,
     /// A frame went out since the last end-of-speech packet.
     talking: bool,
+    /// Where an identity upgraded by tsclientlib is saved.
+    identity_path: PathBuf,
     shutdown: CancellationToken,
 }
 
 impl Client {
+    /// Loads the identity (or creates it on the first start) and starts connecting.
     pub fn new(
-        config: &TeamspeakConfig,
+        config: &Config,
+        secrets: &TeamspeakSecrets,
         events: mpsc::Sender<ClientEvent>,
         requests: mpsc::Receiver<ClientRequest>,
         frames: mpsc::Receiver<Frame>,
         control: watch::Receiver<AudioControl>,
         shutdown: CancellationToken,
     ) -> ClientResult<Self> {
+        let identity_path = config.paths.state_dir.join(&config.teamspeak.identity_file);
+        let identity = identity::load_or_create(&identity_path)?;
         Ok(Self {
-            connection: connect::connect(config)?,
+            connection: connect::connect(&config.teamspeak, secrets, identity)?,
             events,
             requests,
             frames,
             control,
             talking: false,
+            identity_path,
             shutdown,
         })
     }
@@ -105,10 +115,14 @@ impl Client {
 
     async fn handle_item(&mut self, item: StreamItem) {
         // TODO: `DisconnectedTemporarily` (tsclientlib reconnects on its own), log it at warn.
-        let StreamItem::BookEvents(events) = item else {
-            return;
-        };
+        match item {
+            StreamItem::BookEvents(events) => self.forward_events(events).await,
+            StreamItem::IdentityLevelIncreased => self.save_identity(),
+            _ => {}
+        }
+    }
 
+    async fn forward_events(&mut self, events: Vec<tsclientlib::events::Event>) {
         let Ok(state) = self.connection.get_state() else {
             // Book events arrive only after connecting, so this branch is not expected.
             warn!("received events before the connection state exists, skipped");
@@ -121,6 +135,16 @@ impl Client {
                 // `Err` means the receiver is gone, which only happens during shutdown.
                 let _ = self.events.send(event).await;
             }
+        }
+    }
+
+    /// Saves the identity after tsclientlib raised its level for the server.
+    /// Only logged on failure, the connection works anyway, the next start computes it again.
+    fn save_identity(&self) {
+        if let Some(identity) = self.connection.get_options().get_identity()
+            && let Err(err) = identity::save(&self.identity_path, identity)
+        {
+            warn!("{:#}", anyhow::Error::from(err));
         }
     }
 

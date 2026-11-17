@@ -21,6 +21,7 @@ use cli::{Cli, Command};
 use client::{AudioControl, Client};
 use config::{ConfigLocation, LogLevel};
 use player::{AudioLauncher, Player};
+use secrets::Secrets;
 use tokio::{
     signal::unix::{SignalKind, signal},
     sync::{mpsc, watch},
@@ -50,6 +51,8 @@ async fn run(location: &ConfigLocation, log_level: Option<LogLevel>) -> anyhow::
     logging::init(log_level, config.logging.level);
     info!("using config file {}", location.file_path().display());
 
+    let secrets = Secrets::load(&config.paths.secrets_file)?;
+
     let shutdown = CancellationToken::new();
 
     let mut sigint = signal(SignalKind::interrupt())?;
@@ -62,7 +65,8 @@ async fn run(location: &ConfigLocation, log_level: Option<LogLevel>) -> anyhow::
     let (control_tx, control_rx) = watch::channel(AudioControl::default());
 
     let client = Client::new(
-        &config.teamspeak,
+        &config,
+        &secrets.teamspeak,
         events_tx,
         requests_rx,
         frames_rx,

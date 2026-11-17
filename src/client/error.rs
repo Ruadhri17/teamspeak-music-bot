@@ -1,3 +1,5 @@
+use crate::secrets::identity::IdentityError;
+
 /// `tsclientlib::Error` is large, so it is boxed to keep every `ClientResult` small.
 #[derive(Debug, thiserror::Error)]
 pub enum ClientError {
@@ -9,6 +11,9 @@ pub enum ClientError {
 
     #[error("cannot send a request to the TeamSpeak server")]
     Request(#[source] Box<tsclientlib::Error>),
+
+    #[error(transparent)]
+    Identity(#[from] IdentityError),
 }
 
 pub type ClientResult<T> = Result<T, ClientError>;

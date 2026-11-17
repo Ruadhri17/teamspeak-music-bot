@@ -24,6 +24,7 @@ pub fn validate(config: &Config) -> Result<(), ValidationError> {
     events(&config.events)?;
 
     not_empty_path("paths.state_dir", &config.paths.state_dir)?;
+    not_empty_path("paths.secrets_file", &config.paths.secrets_file)?;
     not_empty_path("paths.ffmpeg_path", &config.paths.ffmpeg_path)?;
     not_empty_path(
         "sources.youtube.yt_dlp_path",

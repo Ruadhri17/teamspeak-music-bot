@@ -2991,6 +2991,7 @@ dependencies = [
  "humantime",
  "humantime-serde",
  "regex",
+ "rustix",
  "secrecy",
  "serde",
  "tempfile",

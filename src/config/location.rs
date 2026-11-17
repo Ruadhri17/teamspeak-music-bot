@@ -100,11 +100,13 @@ impl ConfigLocation {
         Ok(config)
     }
 
-    /// Makes relative paths (`state_dir`, event sounds, `music_dir`) relative to `base_dir`.
+    /// Makes relative paths (`state_dir`, `secrets_file`, event sounds, `music_dir`)
+    /// relative to `base_dir`.
     /// Bare program names (`ffmpeg`, `yt-dlp`) stay as they are and are looked up in `PATH`.
     /// `teamspeak.identity_file` is relative to `state_dir` and is joined where it is used.
     fn resolve_paths(&self, config: &mut Config) {
         self.resolve(&mut config.paths.state_dir);
+        self.resolve(&mut config.paths.secrets_file);
 
         for path in [
             &mut config.events.on_idle.sound,

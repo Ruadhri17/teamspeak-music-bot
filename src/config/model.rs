@@ -292,6 +292,8 @@ pub struct LocalConfig {
 pub struct PathsConfig {
     /// Identity and Tidal session.
     pub state_dir: PathBuf,
+    /// Passwords and API keys, must be `0600`. Ignored under systemd credentials.
+    pub secrets_file: PathBuf,
     pub ffmpeg_path: PathBuf,
 }
 
@@ -299,6 +301,7 @@ impl Default for PathsConfig {
     fn default() -> Self {
         Self {
             state_dir: "state".into(),
+            secrets_file: "secrets.toml".into(),
             ffmpeg_path: "ffmpeg".into(),
         }
     }

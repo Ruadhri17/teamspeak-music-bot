@@ -44,6 +44,7 @@ fn cause(err: &ConfigError) -> String {
 fn resolved_default(dir: &Path) -> Config {
     let mut config = Config::default();
     config.paths.state_dir = dir.join("state");
+    config.paths.secrets_file = dir.join("secrets.toml");
     config
 }
 
@@ -224,6 +225,7 @@ fn load_resolves_relative_paths_against_config_dir() {
         r#"
 [paths]
 state_dir = "data/state"
+secrets_file = "private/secrets.toml"
 
 [events.on_idle]
 sound = "sounds/bye.wav"
@@ -241,6 +243,7 @@ music_dir = "music"
     let config = location.load().unwrap();
     let base = dir.path();
     assert_eq!(config.paths.state_dir, base.join("data/state"));
+    assert_eq!(config.paths.secrets_file, base.join("private/secrets.toml"));
     assert_eq!(
         config.events.on_idle.sound,
         Some(base.join("sounds/bye.wav"))

@@ -127,6 +127,9 @@ fn empty_required_values_are_rejected() {
             c.teamspeak.home_channel = Some(ChannelRef::Name(" ".into()))
         }),
         ("paths.state_dir", |c| c.paths.state_dir = PathBuf::new()),
+        ("paths.secrets_file", |c| {
+            c.paths.secrets_file = PathBuf::new()
+        }),
         ("paths.ffmpeg_path", |c| {
             c.paths.ffmpeg_path = PathBuf::new()
         }),
