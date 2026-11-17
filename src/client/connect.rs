@@ -3,12 +3,11 @@ use tsclientlib::{ChannelId, Connection};
 use super::{ClientError, ClientResult};
 use crate::config::{ChannelRef, TeamspeakConfig};
 
-/// Builds the connection from `[teamspeak]`. The handshake itself continues while `events()`
-/// is polled in `Client::run`, so this returns before the bot is actually on the server.
+/// Builds the connection from `[teamspeak]`.
+/// Returns before the bot is on the server, the handshake goes on while `events()` is polled.
 pub fn connect(config: &TeamspeakConfig) -> ClientResult<Connection> {
     let options = Connection::build(config.address.as_str()).name(config.nickname.clone());
 
-    // Every arm returns `ConnectOptions`, so the match has one type.
     let options = match &config.home_channel {
         Some(ChannelRef::Id(id)) => options.channel_id(ChannelId(*id)),
         Some(ChannelRef::Name(path)) => options.channel(path.clone()),

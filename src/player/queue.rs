@@ -1,16 +1,11 @@
 //! The song queue and the `!queue ...` commands.
-//!
-//! `Queue` holds the songs waiting after the current one. It knows nothing about
-//! the player or async, so it is tested on its own. The `impl Player` block below
-//! turns `!queue show|remove|clear` into calls on it.
 
 use std::{collections::VecDeque, num::NonZeroUsize};
 
 use super::Player;
 use crate::sources::TrackRef;
 
-/// Songs waiting after the current one. Positions as the user sees them count from 1,
-/// the conversion to `VecDeque` indexes happens only here.
+/// Songs waiting after the current one. Positions count from 1, as shown on the chat.
 #[derive(Debug, Default)]
 pub(super) struct Queue {
     tracks: VecDeque<TrackRef>,
@@ -91,7 +86,7 @@ impl Queue {
 }
 
 impl Player {
-    /// `!queue show [page]`. Always answers, it is an informational command.
+    /// `!queue show [page]`. Always replies (informational command).
     // TODO: TS3 messages are limited to about 1024 characters, long titles need cutting.
     pub(super) fn queue_show(&self, page: NonZeroUsize) -> String {
         let Some(page) = self.queue.page(page, self.page_size) else {

@@ -94,7 +94,7 @@ fn audio(audio: &AudioConfig) -> Result<(), ValidationError> {
 }
 
 fn events(events: &EventsConfig) -> Result<(), ValidationError> {
-    // Zero would make the bot leave the moment playback stops or the channel empties.
+    // A zero delay would make the bot leave as soon as playback stops or the channel empties.
     ensure(
         !events.on_idle.delay.is_zero(),
         "events.on_idle.delay",
@@ -157,7 +157,7 @@ fn not_empty_path(field: &'static str, path: &Path) -> Result<(), ValidationErro
     ensure(!path.as_os_str().is_empty(), field, || EMPTY.into())
 }
 
-/// `None` is fine (feature off), `Some("")` is almost certainly a mistake.
+/// `None` disables the feature, `Some("")` is rejected as a likely mistake.
 fn optional_text(field: &'static str, value: Option<&str>) -> Result<(), ValidationError> {
     value.map_or(Ok(()), |value| {
         ensure(!value.trim().is_empty(), field, || EMPTY_OPTIONAL.into())

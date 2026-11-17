@@ -41,10 +41,11 @@ impl Decoder {
             .stderr(Stdio::null())
             .spawn()?;
 
+        // Both pipes are set to `piped()` above, so `take` returns `Some`.
         let mut stdin = child.stdin.take().unwrap();
-        // Separate thread, or reading stdout and writing stdin block each other.
+        // Written on a separate thread, otherwise the stdin and stdout pipes can deadlock.
         let _writer = std::thread::spawn(move || {
-            // `BrokenPipe` here is normal when ffmpeg is killed early (`!next`).
+            // `BrokenPipe` is normal when ffmpeg is killed early (`!song next`).
             let _ = std::io::copy(&mut input, &mut stdin);
             // `stdin` is dropped here, ffmpeg sees end of input.
         });
@@ -61,6 +62,7 @@ impl Decoder {
 
         let mut frame = [0f32; FRAME_SAMPLES];
         for (sample, chunk) in frame.iter_mut().zip(bytes.chunks_exact(4)) {
+            // `chunks_exact(4)` gives 4-byte slices, so the conversion to `[u8; 4]` cannot fail.
             *sample = f32::from_le_bytes(chunk.try_into().unwrap());
         }
         Some(frame)
@@ -69,7 +71,7 @@ impl Decoder {
 
 impl Drop for Decoder {
     fn drop(&mut self) {
-        // Kill ffmpeg if it still runs (`!next`) and collect its exit status, so no process is left behind.
+        // Kills ffmpeg if it is still running and reaps it to avoid a zombie process.
         let _ = self.child.kill();
         let _ = self.child.wait();
     }

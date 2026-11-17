@@ -1,9 +1,7 @@
 //! Chat command parser: `!song`, `!queue`, `!bot`.
 //!
 //! Turns message text into a `Command` with flags (`--source`, `--track|--album|--playlist`)
-//! and returns readable usage errors. Does not execute commands, that is the player's job.
-//! It does not check permissions or tell links from phrases either, that belongs to
-//! `permissions` and `sources`.
+//! and returns readable usage errors. Does not execute commands or check permissions.
 
 mod error;
 
@@ -29,7 +27,7 @@ const SET_USAGE: &str = "!bot config set <section.key> <value>";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Command {
-    /// `!bot ping`, a quick check that the bot is alive.
+    /// `!bot ping`, a liveness check.
     Ping,
     /// `!song add [flags] <link | phrase>`.
     Add {
@@ -92,27 +90,24 @@ fn parse_song(words: &[&str]) -> CommandResult {
     }
 }
 
-/// Flags come before the phrase, in any order. Everything after the first word
-/// that is not a flag is the phrase, so `daft punk --album` searches for that whole text.
+/// Flags come before the phrase, in any order. The phrase starts at the first word
+/// that is not a flag.
 fn parse_add(mut words: &[&str]) -> CommandResult {
     let mut source = None;
     let mut kind = None;
 
-    // Every pass takes one flag off the front of `words`.
     loop {
         match words {
             ["--source", name, tail @ ..] => {
                 let parsed = source_kind(name)
                     .ok_or_else(|| CommandError::UnknownSource(name.to_string()))?;
-                // `replace` returns the old value, `Some` means the flag was already there.
                 if source.replace(parsed).is_some() {
                     return Err(CommandError::RepeatedFlag("--source"));
                 }
                 words = tail;
             }
             ["--source"] => return Err(CommandError::MissingValue("--source")),
-            // Any other `--` word must be a kind flag. Without this check a typo like `--sorce`
-            // would end up in the search phrase.
+            // Any other `--` word must be a kind flag, so a typo is an error, not part of the phrase.
             [flag, tail @ ..] if flag.starts_with("--") => {
                 let parsed =
                     search_kind(flag).ok_or_else(|| CommandError::UnknownFlag(flag.to_string()))?;
@@ -183,7 +178,7 @@ fn parse_config(words: &[&str]) -> CommandResult {
     }
 }
 
-/// Source names are case insensitive, `--source Tidal` works too.
+/// Case insensitive.
 fn source_kind(name: &str) -> Option<SourceKind> {
     match name.to_ascii_lowercase().as_str() {
         "tidal" => Some(SourceKind::Tidal),
@@ -204,7 +199,7 @@ fn search_kind(flag: &str) -> Option<SearchKind> {
     }
 }
 
-/// Page and position numbers start at 1, so 0 is rejected together with non-numbers.
+/// A page or position, counted from 1.
 fn number(text: &str) -> Result<NonZeroUsize, CommandError> {
     text.parse()
         .map_err(|_| CommandError::InvalidNumber(text.to_string()))

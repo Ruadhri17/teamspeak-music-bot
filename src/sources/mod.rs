@@ -1,7 +1,6 @@
 //! Music sources.
 //!
-//! - `TrackRef`: lightweight song description in the queue (no stream URL, since URLs expire),
-//!   resolved on `!song add` and opened only right before playing
+//! - `TrackRef`: a song in the queue, resolved on `!song add` and opened right before playing
 //! - TODO: common `Source` interface: resolve a link, search (track/album/playlist), open a stream
 //! - TODO: link detection with regexes (source and resource type), allow-list of hosts
 
@@ -13,8 +12,7 @@ mod youtube;
 
 use std::path::PathBuf;
 
-/// A song waiting in the queue or playing. Holds no open file or stream,
-/// so a long queue costs nothing and nothing expires while it waits.
+/// A song in the queue or playing. Holds no open file or stream.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TrackRef {
     pub location: Location,
@@ -22,8 +20,7 @@ pub struct TrackRef {
     pub title: String,
 }
 
-/// Where a track comes from and how its source finds it again.
-/// One variant per source, so each carries the identifier type that source uses.
+/// Where a track comes from, one variant per source with its own identifier.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Location {
     /// Relative to `music_dir`, checked again when opened.
@@ -31,7 +28,7 @@ pub enum Location {
     // TODO: Tidal, Youtube, Spotify, Soundcloud with their own IDs.
 }
 
-/// What a search phrase looks for. A link carries its own type, so this only applies to phrases.
+/// What a search phrase looks for. Links carry their own type.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub enum SearchKind {
     #[default]

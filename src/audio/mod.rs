@@ -22,11 +22,10 @@ pub const SAMPLES_PER_CHANNEL: usize = SAMPLE_RATE * FRAME_DURATION.as_millis() 
 /// One frame, interleaved (left, right, left, ...).
 pub const FRAME_SAMPLES: usize = SAMPLES_PER_CHANNEL * CHANNELS;
 
-/// Audio data from any source
+/// Audio data from any source.
 pub type AudioInput = Box<dyn Read + Send>;
 
-/// One Opus packet, tagged with the playback it belongs to,
-/// so the client can drop the frames of a stopped track still waiting in the channel.
+/// One Opus packet and the number of the playback it belongs to.
 #[derive(Debug)]
 pub struct Frame {
     pub stream: u64,
@@ -35,8 +34,6 @@ pub struct Frame {
 
 /// Plays `input` on a new thread, pushing Opus packets tagged with `stream` into `frames`
 /// until the track ends, `stop` is cancelled or the receiver is gone. Then the thread calls `on_done`.
-///
-/// `on_done` is a callback, so this module does not need to know who listens or why.
 pub fn play(
     ffmpeg_path: PathBuf,
     input: AudioInput,
@@ -49,6 +46,7 @@ pub fn play(
     let (bitrate, complexity) = (audio.bitrate, audio.complexity);
 
     std::thread::spawn(move || {
+        // TODO: handle these errors, a panic skips `on_done` and the player stays `Playing`.
         let mut decoder = Decoder::spawn(&ffmpeg_path, input).unwrap();
         let mut encoder = OpusEncoder::new(bitrate, complexity).unwrap();
         while let Some(frame) = decoder.read_frame() {
@@ -56,7 +54,7 @@ pub fn play(
                 break;
             }
             let data = encoder.encode(&frame).unwrap();
-            // Waits while the buffer is full, `Err` means the client is gone.
+            // Blocks while the buffer is full. `Err` means the client is gone.
             if frames.blocking_send(Frame { stream, data }).is_err() {
                 break;
             }

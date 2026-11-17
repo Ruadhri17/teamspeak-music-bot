@@ -11,11 +11,10 @@ use tracing_subscriber::{
 
 use crate::config::LogLevel;
 
-/// Remote control for the log filter. Cheap to clone, can be sent to other tasks.
+/// Handle for changing the log filter at runtime. Cheap to clone and `Send`.
 pub type LogHandle = reload::Handle<EnvFilter, Registry>;
 
-/// Libraries that log every packet at `info` and below. Kept at `warn` unless `RUST_LOG` says
-/// otherwise, so `--log-level trace` shows bot's code, not TeamSpeak protocol internals.
+/// Libraries that log every packet, kept at `warn` unless `RUST_LOG` says otherwise.
 const QUIET_CRATES: [&str; 2] = ["tsclientlib", "tsproto"];
 
 impl From<LogLevel> for LevelFilter {
@@ -30,8 +29,7 @@ impl From<LogLevel> for LevelFilter {
     }
 }
 
-/// Call once in `run`, after the config is loaded. Errors before that (bad config file)
-/// are printed by `main` through anyhow, not through tracing.
+/// Call once, after the config is loaded.
 pub fn init(cli_level: Option<LogLevel>, config_level: LogLevel) -> LogHandle {
     let rust_log = std::env::var("RUST_LOG").ok();
     let filter = build_filter(cli_level, rust_log.as_deref(), config_level);
@@ -46,7 +44,7 @@ pub fn init(cli_level: Option<LogLevel>, config_level: LogLevel) -> LogHandle {
         )
         .init();
 
-    // Reported only now, because before `init` there is nowhere to log it.
+    // Reported after `init`, since no subscriber exists before it.
     if cli_level.is_none()
         && let Some(value) = rust_log.as_deref().filter(|value| is_invalid(value))
     {
@@ -56,8 +54,8 @@ pub fn init(cli_level: Option<LogLevel>, config_level: LogLevel) -> LogHandle {
     handle
 }
 
-/// Picks the filter by priority. `rust_log` is the value of `RUST_LOG`, passed in so tests
-/// do not have to change the environment. Empty or invalid `RUST_LOG` counts as unset.
+/// Picks the filter by priority. `rust_log` is the value of `RUST_LOG`,
+/// empty or invalid counts as unset.
 pub fn build_filter(
     cli_level: Option<LogLevel>,
     rust_log: Option<&str>,

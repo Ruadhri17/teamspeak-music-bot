@@ -27,13 +27,11 @@ pub struct Config {
 pub struct TeamspeakConfig {
     /// Host, `host:port`, IP or server nickname, resolved by tsclientlib.
     pub address: String,
-    /// bot nickname
     pub nickname: String,
-    /// bot description
     pub description: String,
     /// Relative to `paths.state_dir`.
     pub identity_file: PathBuf,
-    /// Set `None` for server's default channel.
+    /// `None` uses the server's default channel.
     pub home_channel: Option<ChannelRef>,
 }
 
@@ -75,6 +73,7 @@ pub struct AudioConfig {
 
 impl Default for AudioConfig {
     fn default() -> Self {
+        // Constants within the limits of each type, so `unwrap` cannot fail.
         Self {
             bitrate: Bitrate::new(96).unwrap(),
             complexity: Complexity::new(10).unwrap(),
@@ -188,6 +187,7 @@ impl Default for QueueConfig {
     fn default() -> Self {
         Self {
             max_len: None,
+            // Not zero, so `unwrap` cannot fail.
             show_page_size: NonZeroUsize::new(15).unwrap(),
         }
     }
@@ -283,7 +283,7 @@ impl Default for YoutubeConfig {
 #[derive(Deserialize, Serialize, Default, Debug, Clone, PartialEq)]
 #[serde(default, deny_unknown_fields)]
 pub struct LocalConfig {
-    /// Set to `None` for local source disabled.
+    /// `None` disables the local source.
     pub music_dir: Option<PathBuf>,
 }
 

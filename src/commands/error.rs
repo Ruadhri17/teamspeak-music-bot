@@ -1,5 +1,4 @@
-/// Shown to the user on the chat as it is, so every message is short and says how to fix it.
-/// No `#[source]`, internal details are not the user's business.
+/// Shown on the chat as it is, so every message is short and says how to fix it.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum CommandError {
     /// Known prefix (`!song`, `!queue`, `!bot`), unknown or malformed command after it.

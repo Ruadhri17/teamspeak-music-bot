@@ -11,7 +11,7 @@ use super::{Config, ConfigError, ConfigResult, validate::validate};
 /// Commented template written by `tsmusic init`. Path is relative to this source file.
 pub(super) const TEMPLATE: &str = include_str!("../../config.toml.template");
 
-/// Created once in `main` from `--config` and shared by everything that reads or writes the file.
+/// The config file and its directory, created from `--config`.
 #[derive(Debug, Clone)]
 pub struct ConfigLocation {
     /// The `config.toml` file.
@@ -21,8 +21,7 @@ pub struct ConfigLocation {
 }
 
 impl ConfigLocation {
-    /// Makes `file_path` absolute (`config.toml` -> `/current/dir/config.toml`), so `base_dir`
-    /// does not depend on where the bot was started from. The file does not need to exist yet.
+    /// Makes `file_path` absolute. The file does not need to exist yet.
     pub fn new(file_path: PathBuf) -> ConfigResult<Self> {
         let invalid = |source| ConfigError::InvalidPath {
             path: file_path.clone(),

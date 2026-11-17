@@ -1,7 +1,6 @@
 //! Value types with built-in limits.
 //!
-//! Each type is checked while serde parses the file (`try_from`), so an out-of-range value
-//! is reported with its line and column, and an invalid value cannot exist anywhere in the program.
+//! Checked while serde parses the file (`try_from`), so an error points to its line.
 
 use serde::{Deserialize, Serialize};
 

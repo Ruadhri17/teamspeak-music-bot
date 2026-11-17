@@ -39,7 +39,7 @@ pub fn translate(event: &Event, bot_id: ClientId) -> Option<ClientEvent> {
         } if invoker.id != bot_id => {
             let reply_to = match target {
                 MessageTarget::Channel => ReplyTo::Channel,
-                // Answers to a poke go to the private chat: pokes are popups limited to 100 chars.
+                // Replies to a poke go to the private chat, pokes are limited to 100 characters.
                 MessageTarget::Client(_) | MessageTarget::Poke(_) => ReplyTo::Client(invoker.id.0),
                 MessageTarget::Server => return None,
             };

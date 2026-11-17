@@ -16,8 +16,7 @@ pub(super) struct Playback {
     pub(super) track: TrackRef,
 }
 
-/// The playback lives inside the states that have a track, so `Idle` cannot hold a stale one.
-/// `Default` is there for `mem::take`, which moves the state out and leaves `Idle` behind.
+/// `Default` (`Idle`) is required by `mem::take`.
 // TODO: `Loading` for Tidal, `Departing` for presence.
 #[derive(Debug, Default)]
 pub(super) enum State {
@@ -28,6 +27,7 @@ pub(super) enum State {
 }
 
 impl State {
+    /// The current track, `None` when idle.
     pub(super) fn playback(&self) -> Option<&Playback> {
         match self {
             State::Idle => None,
