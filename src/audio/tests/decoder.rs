@@ -13,7 +13,7 @@ fn sine(dir: &TempDir, seconds: u32) -> AudioInput {
         .status()
         .expect("ffmpeg is installed");
     assert!(status.success());
-    Box::new(File::open(path).unwrap())
+    AudioInput::File(File::open(path).unwrap())
 }
 
 fn count_frames(decoder: &mut Decoder) -> usize {
@@ -40,7 +40,7 @@ fn frames_contain_sound() {
 
 #[test]
 fn invalid_input_gives_no_frames_and_an_ffmpeg_error() {
-    let input: AudioInput = Box::new(&b"this is not audio"[..]);
+    let input: AudioInput = AudioInput::Stream(Box::new(&b"this is not audio"[..]));
     let mut decoder = Decoder::spawn(Path::new("ffmpeg"), input).unwrap();
     assert_eq!(count_frames(&mut decoder), 0);
     match decoder.finish() {
@@ -62,7 +62,7 @@ fn whole_track_finishes_cleanly() {
 
 #[test]
 fn input_read_error_is_reported() {
-    let input: AudioInput = Box::new(FailingReader);
+    let input: AudioInput = AudioInput::Stream(Box::new(FailingReader));
     let mut decoder = Decoder::spawn(Path::new("ffmpeg"), input).unwrap();
     count_frames(&mut decoder);
     assert!(matches!(decoder.finish(), Err(AudioError::Input(_))));
@@ -86,6 +86,40 @@ fn dropping_mid_track_stops_ffmpeg() {
 
 #[test]
 fn missing_ffmpeg_is_an_error() {
-    let input: AudioInput = Box::new(&b""[..]);
+    let input = AudioInput::Stream(Box::new(&b""[..]));
     assert!(Decoder::spawn(Path::new("/nonexistent/ffmpeg"), input).is_err());
+}
+
+fn m4a_with_index_last(dir: &TempDir, seconds: u32) -> std::path::PathBuf {
+    let path = dir.path().join("sine.m4a");
+    let status = Command::new("ffmpeg")
+        .args(["-loglevel", "error", "-f", "lavfi", "-i"])
+        .arg(format!("sine=frequency=440:duration={seconds}"))
+        .args(["-c:a", "aac"])
+        .arg(&path)
+        .status()
+        .expect("ffmpeg is installed");
+    assert!(status.success());
+    path
+}
+
+#[test]
+fn m4a_file_with_index_last_decodes_fully() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = m4a_with_index_last(&dir, 10);
+    let input = AudioInput::File(File::open(path).unwrap());
+    let mut decoder = Decoder::spawn(Path::new("ffmpeg"), input).unwrap();
+    let frames = count_frames(&mut decoder);
+    assert!((499..=501).contains(&frames), "{frames} frames");
+    assert!(decoder.finish().is_ok());
+}
+
+#[test]
+fn m4a_stream_with_index_last_is_an_ffmpeg_error() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = m4a_with_index_last(&dir, 10);
+    let input = AudioInput::Stream(Box::new(File::open(path).unwrap()));
+    let mut decoder = Decoder::spawn(Path::new("ffmpeg"), input).unwrap();
+    assert_eq!(count_frames(&mut decoder), 0);
+    assert!(matches!(decoder.finish(), Err(AudioError::Ffmpeg { .. })));
 }

@@ -26,7 +26,7 @@ fn sine(dir: &tempfile::TempDir, seconds: u32) -> AudioInput {
         .status()
         .expect("ffmpeg is installed");
     assert!(status.success());
-    Box::new(File::open(path).unwrap())
+    AudioInput::File(File::open(path).unwrap())
 }
 
 struct Run {
@@ -67,14 +67,14 @@ fn whole_track_reports_ok_with_tagged_frames() {
 
 #[test]
 fn missing_ffmpeg_reports_spawn_error() {
-    let run = start("/nonexistent/ffmpeg", Box::new(&b""[..]), 8);
+    let run = start("/nonexistent/ffmpeg", AudioInput::Stream(Box::new(&b""[..])), 8);
     let result = run.done.recv_timeout(TIMEOUT).unwrap();
     assert!(matches!(result, Err(AudioError::Spawn(_))), "{result:?}");
 }
 
 #[test]
 fn invalid_input_reports_ffmpeg_error() {
-    let run = start("ffmpeg", Box::new(&b"this is not audio"[..]), 8);
+    let run = start("ffmpeg", AudioInput::Stream(Box::new(&b"this is not audio"[..])), 8);
     let result = run.done.recv_timeout(TIMEOUT).unwrap();
     assert!(matches!(result, Err(AudioError::Ffmpeg { .. })), "{result:?}");
 }

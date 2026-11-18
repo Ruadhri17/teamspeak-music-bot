@@ -6,8 +6,10 @@ use audiopus::{Application, Channels, SampleRate, coder::Encoder};
 use super::FRAME_SAMPLES;
 use crate::config::{Bitrate, Complexity};
 
-/// Output buffer size recommended by the libopus docs for `opus_encode`.
-const MAX_PACKET: usize = 4000;
+/// Largest Opus packet TeamSpeak 3 accepts: 500 B per voice packet minus the 16 B header.
+/// tsproto neither splits nor checks voice packets. Opus treats the buffer size as a hard
+/// limit and lowers the quality of a frame that would not fit (measured: 192 kb/s gives up to 754 B).
+pub const MAX_PACKET: usize = 484;
 
 pub struct OpusEncoder {
     encoder: Encoder,

@@ -5,6 +5,7 @@ mod decoder;
 mod encoder;
 
 use std::{
+    fs::File,
     io::{self, Read},
     path::{Path, PathBuf},
     process::ExitStatus,
@@ -28,8 +29,16 @@ pub const SAMPLES_PER_CHANNEL: usize = SAMPLE_RATE * FRAME_DURATION.as_millis() 
 /// One frame, interleaved (left, right, left, ...).
 pub const FRAME_SAMPLES: usize = SAMPLES_PER_CHANNEL * CHANNELS;
 
-/// Audio data from any source.
-pub type AudioInput = Box<dyn Read + Send>;
+/// Audio data from any source, always given to ffmpeg on its stdin, never as a path or URL.
+pub enum AudioInput {
+    /// A seekable file, becomes ffmpeg's stdin directly. Seeking is needed by formats
+    /// with the index at the end, e.g. MP4/M4A with `moov` last, which fail through a pipe.
+    File(File),
+    /// Data that cannot seek (network, another process), copied into a pipe on a thread.
+    // TODO: remove the `allow` once the YouTube source opens tracks.
+    #[allow(dead_code)]
+    Stream(Box<dyn Read + Send>),
+}
 
 /// Why a track stopped before its end. A stop on request (`stop`, client gone) is not an error.
 /// Only for logs, the ffmpeg output may contain details of the input.

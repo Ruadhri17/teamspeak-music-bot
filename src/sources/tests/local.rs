@@ -2,9 +2,12 @@ use std::{fs, io::Read, path::Path};
 
 use tempfile::TempDir;
 
-use crate::sources::{
-    Location, TrackRef,
-    local::{self, LocalError},
+use crate::{
+    audio::AudioInput,
+    sources::{
+        Location, TrackRef,
+        local::{self, LocalError},
+    },
 };
 
 fn music_dir() -> TempDir {
@@ -39,10 +42,28 @@ fn resolve_works_in_subdirectories() {
 }
 
 #[test]
-fn resolve_normalizes_dots_inside_music_dir() {
+fn resolve_accepts_current_dir_parts() {
     let dir = music_dir();
-    let track = local::resolve(dir.path(), "album/../song.mp3").unwrap();
+    let track = local::resolve(dir.path(), "./song.mp3").unwrap();
     assert_eq!(track.location, Location::Local("song.mp3".into()));
+}
+
+#[test]
+fn parent_parts_are_not_found_even_inside_music_dir() {
+    let dir = music_dir();
+    assert!(not_found(local::resolve(dir.path(), "album/../song.mp3")));
+}
+
+#[test]
+fn unreadable_subdirectory_is_not_found() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = music_dir();
+    let locked = dir.path().join("locked");
+    fs::create_dir(&locked).unwrap();
+    fs::set_permissions(&locked, fs::Permissions::from_mode(0o000)).unwrap();
+    let result = local::resolve(dir.path(), "locked/song.mp3");
+    fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).unwrap();
+    assert!(not_found(result));
 }
 
 #[test]
@@ -93,11 +114,11 @@ fn symlink_leaving_music_dir_is_not_found() {
 fn open_reads_a_resolved_track() {
     let dir = music_dir();
     let Location::Local(path) = local::resolve(dir.path(), "song.mp3").unwrap().location;
+    let AudioInput::File(mut file) = local::open(dir.path(), &path).unwrap() else {
+        panic!("a local track opens as a file");
+    };
     let mut data = Vec::new();
-    local::open(dir.path(), &path)
-        .unwrap()
-        .read_to_end(&mut data)
-        .unwrap();
+    file.read_to_end(&mut data).unwrap();
     assert_eq!(data, b"audio");
 }
 

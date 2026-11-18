@@ -3,7 +3,10 @@ use std::f32::consts::TAU;
 use audiopus::{Channels, SampleRate, coder::Decoder};
 
 use crate::{
-    audio::{FRAME_SAMPLES, SAMPLE_RATE, SAMPLES_PER_CHANNEL, encoder::OpusEncoder},
+    audio::{
+        FRAME_SAMPLES, SAMPLE_RATE, SAMPLES_PER_CHANNEL,
+        encoder::{MAX_PACKET, OpusEncoder},
+    },
     config::{Bitrate, Complexity},
 };
 
@@ -63,4 +66,25 @@ fn packets_decode_back_to_sound() {
         loudest = pcm.iter().fold(loudest, |max, s| max.max(s.abs()));
     }
     assert!((0.3..=0.7).contains(&loudest), "loudest sample {loudest}");
+}
+
+fn noise_frame(seed: &mut u32) -> [f32; FRAME_SAMPLES] {
+    let mut frame = [0.0; FRAME_SAMPLES];
+    for sample in &mut frame {
+        *seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+        *sample = (*seed >> 8) as f32 / (1 << 23) as f32 - 1.0;
+    }
+    frame
+}
+
+#[test]
+fn loud_noise_at_max_bitrate_fits_a_teamspeak_packet() {
+    let mut encoder = encoder(Bitrate::MAX);
+    let mut seed = 1;
+    let largest = (0..100)
+        .map(|_| encoder.encode(&noise_frame(&mut seed)).unwrap().len())
+        .max()
+        .unwrap();
+    assert!(largest <= MAX_PACKET, "{largest} B");
+    assert!(largest > MAX_PACKET / 2, "{largest} B");
 }

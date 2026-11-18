@@ -4,7 +4,7 @@
 use std::{
     fs::File,
     io,
-    path::{Path, PathBuf},
+    path::{Component, Path, PathBuf},
 };
 
 use super::{Location, TrackRef};
@@ -47,16 +47,30 @@ pub fn resolve(music_dir: &Path, query: &str) -> Result<TrackRef, LocalError> {
 /// it may have become a symlink outside `music_dir` while queued.
 pub fn open(music_dir: &Path, path: &Path) -> Result<AudioInput, LocalError> {
     let (full, _) = inside(music_dir, path)?;
-    Ok(Box::new(File::open(full)?))
+    Ok(AudioInput::File(File::open(full)?))
 }
 
 /// Returns the canonical full path and the path relative to `music_dir`,
 /// or `NotFound` when `path` leaves `music_dir` or is not a file.
 fn inside(music_dir: &Path, path: &Path) -> Result<(PathBuf, PathBuf), LocalError> {
-    // Both sides are canonical (`..`, symlinks and relative parts resolved),
+    // Rejected before touching the disk: `..` and absolute paths never point into `music_dir`
+    // in a useful way, and probing outside could tell what exists on the host.
+    if !path
+        .components()
+        .all(|part| matches!(part, Component::Normal(_) | Component::CurDir))
+    {
+        return Err(LocalError::NotFound);
+    }
+
+    // Both sides are canonical (symlinks and relative parts resolved),
     // so the prefix check below is reliable.
     let music_dir = music_dir.canonicalize()?;
-    let full = music_dir.join(path).canonicalize()?;
+    // Any error here is `NotFound`, e.g. a subdirectory without access would otherwise
+    // answer differently from a missing one.
+    let full = music_dir
+        .join(path)
+        .canonicalize()
+        .map_err(|_| LocalError::NotFound)?;
 
     // `strip_prefix` fails exactly when `full` is outside `music_dir`.
     // Outside answers the same as missing, so the chat cannot probe which files exist on the host.
