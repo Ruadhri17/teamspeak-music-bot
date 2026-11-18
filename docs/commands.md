@@ -89,7 +89,7 @@ Examples:
 | `spotify` | Spotify | Planned |
 | `youtube` | YouTube / YouTube Music (default) | First to be supported |
 | `soundcloud` | SoundCloud | Planned |
-| `local` | Audio files stored on the bot's server | Planned |
+| `local` | Audio files stored on the bot's server | Supported |
 
 After adding:
 
