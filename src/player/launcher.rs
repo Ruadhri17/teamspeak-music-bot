@@ -7,7 +7,7 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 use crate::{
-    audio::{self, AudioInput, Frame},
+    audio::{self, AudioInput, Frame, PlayResult},
     config::{AudioConfig, Config},
 };
 
@@ -20,7 +20,7 @@ pub trait Launcher: Send + Sync {
         input: AudioInput,
         stream: u64,
         stop: CancellationToken,
-        on_done: Box<dyn FnOnce() + Send>,
+        on_done: Box<dyn FnOnce(PlayResult) + Send>,
     );
 }
 
@@ -47,7 +47,7 @@ impl Launcher for AudioLauncher {
         input: AudioInput,
         stream: u64,
         stop: CancellationToken,
-        on_done: Box<dyn FnOnce() + Send>,
+        on_done: Box<dyn FnOnce(PlayResult) + Send>,
     ) {
         audio::play(
             self.ffmpeg_path.clone(),

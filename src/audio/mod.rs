@@ -4,12 +4,18 @@
 mod decoder;
 mod encoder;
 
-use std::{io::Read, path::PathBuf, thread::JoinHandle, time::Duration};
+use std::{
+    io::{self, Read},
+    path::{Path, PathBuf},
+    process::ExitStatus,
+    thread::JoinHandle,
+    time::Duration,
+};
 
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
-use crate::config::AudioConfig;
+use crate::config::{AudioConfig, Bitrate, Complexity};
 use decoder::Decoder;
 use encoder::OpusEncoder;
 
@@ -25,6 +31,31 @@ pub const FRAME_SAMPLES: usize = SAMPLES_PER_CHANNEL * CHANNELS;
 /// Audio data from any source.
 pub type AudioInput = Box<dyn Read + Send>;
 
+/// Why a track stopped before its end. A stop on request (`stop`, client gone) is not an error.
+/// Only for logs, the ffmpeg output may contain details of the input.
+#[derive(Debug, thiserror::Error)]
+pub enum AudioError {
+    #[error("cannot start ffmpeg: {0}")]
+    Spawn(#[source] io::Error),
+
+    #[error("cannot read the track: {0}")]
+    Input(#[source] io::Error),
+
+    #[error("cannot read the ffmpeg output: {0}")]
+    Output(#[source] io::Error),
+
+    #[error("ffmpeg failed ({status}): {stderr}")]
+    Ffmpeg { status: ExitStatus, stderr: String },
+
+    #[error("Opus encoder failed: {0}")]
+    Encoder(#[source] audiopus::Error),
+
+    #[error("the audio thread panicked")]
+    Panicked,
+}
+
+pub type PlayResult = Result<(), AudioError>;
+
 /// One Opus packet and the number of the playback it belongs to.
 #[derive(Debug)]
 pub struct Frame {
@@ -33,7 +64,8 @@ pub struct Frame {
 }
 
 /// Plays `input` on a new thread, pushing Opus packets tagged with `stream` into `frames`
-/// until the track ends, `stop` is cancelled or the receiver is gone. Then the thread calls `on_done`.
+/// until the track ends, `stop` is cancelled or the receiver is gone.
+/// Then the thread calls `on_done` with the result, also when it panics.
 pub fn play(
     ffmpeg_path: PathBuf,
     input: AudioInput,
@@ -41,26 +73,68 @@ pub fn play(
     stream: u64,
     frames: mpsc::Sender<Frame>,
     stop: CancellationToken,
-    on_done: impl FnOnce() + Send + 'static,
+    on_done: impl FnOnce(PlayResult) + Send + 'static,
 ) -> JoinHandle<()> {
     let (bitrate, complexity) = (audio.bitrate, audio.complexity);
 
     std::thread::spawn(move || {
-        // TODO: handle these errors, a panic skips `on_done` and the player stays `Playing`.
-        let mut decoder = Decoder::spawn(&ffmpeg_path, input).unwrap();
-        let mut encoder = OpusEncoder::new(bitrate, complexity).unwrap();
-        while let Some(frame) = decoder.read_frame() {
-            if stop.is_cancelled() {
-                break;
-            }
-            let data = encoder.encode(&frame).unwrap();
-            // Blocks while the buffer is full. `Err` means the client is gone.
-            if frames.blocking_send(Frame { stream, data }).is_err() {
-                break;
-            }
-        }
-        on_done();
+        let done = DoneGuard(Some(on_done));
+        let result = decode(
+            &ffmpeg_path,
+            input,
+            bitrate,
+            complexity,
+            stream,
+            &frames,
+            &stop,
+        );
+        // A stopped track fails to read once ffmpeg is killed, that is not an error.
+        done.finish(if stop.is_cancelled() { Ok(()) } else { result });
     })
+}
+
+fn decode(
+    ffmpeg_path: &Path,
+    input: AudioInput,
+    bitrate: Bitrate,
+    complexity: Complexity,
+    stream: u64,
+    frames: &mpsc::Sender<Frame>,
+    stop: &CancellationToken,
+) -> PlayResult {
+    let mut decoder = Decoder::spawn(ffmpeg_path, input).map_err(AudioError::Spawn)?;
+    let mut encoder = OpusEncoder::new(bitrate, complexity).map_err(AudioError::Encoder)?;
+    while let Some(frame) = decoder.read_frame().map_err(AudioError::Output)? {
+        if stop.is_cancelled() {
+            return Ok(());
+        }
+        let data = encoder.encode(&frame).map_err(AudioError::Encoder)?;
+        // Blocks while the buffer is full. `Err` means the client is gone.
+        if frames.blocking_send(Frame { stream, data }).is_err() {
+            return Ok(());
+        }
+    }
+    decoder.finish()
+}
+
+/// Calls `on_done` exactly once. When the thread panics, `Drop` reports `Panicked`,
+/// otherwise the player would stay `Playing` forever.
+struct DoneGuard<F: FnOnce(PlayResult)>(Option<F>);
+
+impl<F: FnOnce(PlayResult)> DoneGuard<F> {
+    fn finish(mut self, result: PlayResult) {
+        if let Some(on_done) = self.0.take() {
+            on_done(result);
+        }
+    }
+}
+
+impl<F: FnOnce(PlayResult)> Drop for DoneGuard<F> {
+    fn drop(&mut self) {
+        if let Some(on_done) = self.0.take() {
+            on_done(Err(AudioError::Panicked));
+        }
+    }
 }
 
 #[cfg(test)]

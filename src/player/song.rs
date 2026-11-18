@@ -124,14 +124,19 @@ impl Player {
         let id = self.new_id();
         let stop = CancellationToken::new();
         let done = self.done_tx.clone();
+        let title = track.title.clone();
         // A track that finished while paused leaves the client paused, unpause for the new one.
         self.control.send_modify(|control| control.paused = false);
         self.launcher.launch(
             input,
             id.0,
             stop.clone(),
-            // `Err` means the player has stopped, the notification is dropped.
-            Box::new(move || {
+            Box::new(move |result| {
+                // Only logged, a failed track ends like a finished one and the queue moves on.
+                if let Err(err) = result {
+                    warn!("playback of {title} failed: {err}");
+                }
+                // `Err` means the player has stopped, the notification is dropped.
                 let _ = done.blocking_send(id);
             }),
         );

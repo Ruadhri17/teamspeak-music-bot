@@ -5,7 +5,7 @@ use tokio::sync::{mpsc, watch};
 use tokio_util::sync::CancellationToken;
 
 use crate::{
-    audio::AudioInput,
+    audio::{AudioInput, PlayResult},
     client::{AudioControl, ClientEvent, ClientRequest},
     commands::Command,
     config::{Config, SourceKind},
@@ -23,7 +23,7 @@ impl Launcher for FakeLauncher {
         _input: AudioInput,
         _stream: u64,
         _stop: CancellationToken,
-        _on_done: Box<dyn FnOnce() + Send>,
+        _on_done: Box<dyn FnOnce(PlayResult) + Send>,
     ) {
     }
 }
