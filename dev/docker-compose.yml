@@ -12,13 +12,13 @@ services:
     restart: unless-stopped
     environment:
       TS3SERVER_LICENSE: accept
-    # Ports bound on all interfaces. With WSL mirrored networking the Windows TS client
-    # connects to localhost, but the server is also reachable from the LAN/VPN.
-    # The bot (inside WSL) connects to localhost.
+    # Ports bound to localhost only, the dev server has no business on the LAN/VPN.
+    # With WSL mirrored networking the Windows TS client still reaches it at localhost,
+    # and the bot (inside WSL) connects to localhost.
     ports:
-      - "9987:9987/udp"             # voice (client and bot)
-      - "127.0.0.1:10011:10011"     # ServerQuery (raw), local only
-      - "30033:30033"               # file transfer
+      - "127.0.0.1:9987:9987/udp"   # voice (client and bot)
+      - "127.0.0.1:10011:10011"     # ServerQuery (raw)
+      - "127.0.0.1:30033:30033"     # file transfer
     volumes:
       - ts3-data:/var/ts3server
 
