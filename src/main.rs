@@ -76,13 +76,19 @@ async fn run(location: &ConfigLocation, log_level: Option<LogLevel>) -> anyhow::
     let mut client = tokio::spawn(client.run());
     let launcher = Box::new(AudioLauncher::new(&config, frames_tx));
     let player = Player::new(events_rx, requests_tx, control_tx, launcher, &config);
-    // Not awaited, the player stops when the client exits and the events channel closes.
-    tokio::spawn(player.run());
+    // Stops by itself once the client exits and the events channel closes.
+    let mut player = tokio::spawn(player.run());
 
     tokio::select! {
         _ = sigint.recv() => info!("SIGINT received, shutting down"),
         _ = sigterm.recv() => info!("SIGTERM received, shutting down"),
         result = &mut client => return Ok(result??),
+        // While the client runs, the player only ends by panicking, which would leave
+        // the bot connected but deaf. Exiting with an error lets systemd restart it.
+        result = &mut player => {
+            result?;
+            anyhow::bail!("player stopped while the client was still running");
+        }
     }
 
     shutdown.cancel();

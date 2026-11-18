@@ -143,10 +143,10 @@ impl Player {
     //   (`Loading` state), since network sources take seconds.
     fn resolve(&self, query: &str, source: Option<SourceKind>) -> Result<TrackRef, String> {
         match source.unwrap_or(self.sources.default) {
-            SourceKind::Tidal => todo!(),
-            SourceKind::Spotify => todo!(),
-            SourceKind::Youtube => todo!(),
-            SourceKind::Soundcloud => todo!(),
+            SourceKind::Tidal
+            | SourceKind::Spotify
+            | SourceKind::Youtube
+            | SourceKind::Soundcloud => Err("this source is not supported yet".to_string()),
             SourceKind::Local => {
                 local::resolve(self.music_dir()?, query).map_err(|err| err.to_string())
             }

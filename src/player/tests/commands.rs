@@ -92,3 +92,15 @@ fn bot_commands_are_not_handled_by_the_player() {
     assert_eq!(h.send("!bot config list"), None);
     assert_eq!(h.send("!bot config reload"), None);
 }
+
+#[test]
+fn unsupported_source_replies_and_keeps_idle() {
+    let mut h = Harness::new();
+    for source in ["tidal", "spotify", "youtube", "soundcloud"] {
+        assert_eq!(
+            h.send(&format!("!song add --source {source} x")),
+            reply("this source is not supported yet")
+        );
+        assert!(h.is_idle());
+    }
+}
