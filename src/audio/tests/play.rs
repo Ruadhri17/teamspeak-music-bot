@@ -1,10 +1,17 @@
-use std::{fs::File, path::PathBuf, process::Command, sync::mpsc as std_mpsc, time::Duration};
+use std::{
+    fs::File,
+    panic::{self, AssertUnwindSafe},
+    path::PathBuf,
+    process::Command,
+    sync::mpsc as std_mpsc,
+    time::Duration,
+};
 
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 use crate::{
-    audio::{AudioError, AudioInput, Frame, PlayResult, play},
+    audio::{AudioError, AudioInput, DoneGuard, Frame, PlayResult, play},
     config::Config,
 };
 
@@ -90,4 +97,25 @@ fn closed_receiver_reports_ok() {
     drop(run.frames);
     let result = run.done.recv_timeout(TIMEOUT).unwrap();
     assert!(result.is_ok(), "{result:?}");
+}
+
+#[test]
+fn guard_reports_panicked_when_dropped_by_a_panic() {
+    let (done_tx, done) = std_mpsc::channel();
+    let result = panic::catch_unwind(AssertUnwindSafe(|| {
+        let _guard = DoneGuard(Some(move |result| done_tx.send(result).unwrap()));
+        panic!("decoder bug");
+    }));
+    assert!(result.is_err());
+    assert!(matches!(done.try_recv(), Ok(Err(AudioError::Panicked))));
+    assert!(done.try_recv().is_err());
+}
+
+#[test]
+fn guard_finish_reports_once() {
+    let (done_tx, done) = std_mpsc::channel();
+    let guard = DoneGuard(Some(move |result| done_tx.send(result).unwrap()));
+    guard.finish(Ok(()));
+    assert!(matches!(done.try_recv(), Ok(Ok(()))));
+    assert!(done.try_recv().is_err());
 }
