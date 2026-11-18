@@ -81,13 +81,13 @@ Examples:
 
 - By default the bot searches for a **track** (`--track`).
 - Use `--album` or `--playlist` to search for an album or a playlist instead. The whole album or playlist is added. `--playlist` searches **public playlists** only.
-- The search uses the **default source** (Tidal, unless changed in the configuration). Use `--source` to pick another one:
+- The search uses the **default source** (YouTube, unless changed in the configuration). Use `--source` to pick another one:
 
 | `--source` value | What it plays | Status |
 | --- | --- | --- |
-| `tidal` | Tidal (default) | First to be supported |
+| `tidal` | Tidal | Planned |
 | `spotify` | Spotify | Planned |
-| `youtube` | YouTube / YouTube Music | Planned |
+| `youtube` | YouTube / YouTube Music (default) | First to be supported |
 | `soundcloud` | SoundCloud | Planned |
 | `local` | Audio files stored on the bot's server | Planned |
 

@@ -69,7 +69,7 @@ blocked_uids = []                   # [live] cannot control or summon the bot
 blocked_groups = []                 # [live] e.g. ["Guest"], admin takes precedence
 
 [sources]
-default = "tidal"                   # [live] tidal | spotify | youtube | soundcloud | local
+default = "youtube"                 # [live] tidal | spotify | youtube | soundcloud | local
 
 [sources.tidal]
 quality = "high"                    # [live] low | high | lossless

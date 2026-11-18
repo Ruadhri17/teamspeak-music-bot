@@ -243,9 +243,9 @@ pub struct SourcesConfig {
 #[derive(Deserialize, Serialize, Default, Debug, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum SourceKind {
-    #[default]
     Tidal,
     Spotify,
+    #[default]
     Youtube,
     Soundcloud,
     Local,
