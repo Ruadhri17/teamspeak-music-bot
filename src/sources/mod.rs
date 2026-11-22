@@ -2,12 +2,11 @@
 //!
 //! - `TrackRef`: a song in the queue, resolved on `!song add` and opened right before playing
 //! - TODO: common `Source` interface: resolve a link, search (track/album/playlist), open a stream
-//! - TODO: link detection with regexes (source and resource type), allow-list of hosts
+//! - `parse_query`: link or search phrase, links checked against each source allow-list of hosts
 
 pub mod local;
 mod soundcloud;
 mod spotify;
-mod tidal;
 pub mod youtube;
 
 use std::path::PathBuf;

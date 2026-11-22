@@ -49,9 +49,6 @@ impl FromStr for VideoId {
 }
 
 impl VideoId {
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
     pub fn url(&self) -> String {
         format!("{YT_URL}{}", self.0)
     }

@@ -26,12 +26,6 @@ fn parse(text: &str) -> Result<VideoId, InvalidVideoId> {
 }
 
 #[test]
-fn valid_id_keeps_its_text() {
-    let id = parse("5NV6Rdv1a3I").unwrap();
-    assert_eq!(id.as_str(), "5NV6Rdv1a3I");
-}
-
-#[test]
 fn dash_and_underscore_are_valid_anywhere() {
     assert!(parse("-abc_def-gh").is_ok());
     assert!(parse("___________").is_ok());
