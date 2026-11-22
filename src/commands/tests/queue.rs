@@ -34,7 +34,7 @@ fn show_rejects_bad_pages() {
     );
     assert_eq!(
         err("!queue show 1 2"),
-        CommandError::Usage("!queue show [page]")
+        CommandError::Usage("!queue show|display [page]")
     );
 }
 
@@ -66,6 +66,6 @@ fn clear() {
 fn unknown_queue_command() {
     assert_eq!(
         err("!queue shuffle"),
-        CommandError::UnknownCommand("!queue show|remove|clear")
+        CommandError::UnknownCommand("!queue show|remove|clear|help")
     );
 }

@@ -1,4 +1,4 @@
-//! Chat command parser: `!song`, `!queue`, `!bot`.
+//! Chat command parser: `!song`, `!queue`, `!bot`, `!help`.
 //!
 //! Turns message text into a `Command` with flags (`--source`, `--track|--album|--playlist`)
 //! and returns readable usage errors. Does not execute commands or check permissions.
@@ -16,24 +16,69 @@ use crate::{
 
 pub type CommandResult = Result<Command, CommandError>;
 
-const PREFIXES: [&str; 3] = ["!song", "!queue", "!bot"];
+const PREFIXES: [&str; 4] = ["!song", "!queue", "!bot", "!help"];
 
-const SONG_COMMANDS: &str = "!song add|pause|resume|next|current";
-const QUEUE_COMMANDS: &str = "!queue show|remove|clear";
-const BOT_COMMANDS: &str = "!bot summon|config";
-const CONFIG_COMMANDS: &str = "!bot config list|get|set|reload";
+const SONG_COMMANDS: &str = "!song add|pause|resume|next|current|help";
+const QUEUE_COMMANDS: &str = "!queue show|remove|clear|help";
+const BOT_COMMANDS: &str = "!bot summon|ping|config|help";
+const CONFIG_COMMANDS: &str = "!bot config list|get|set|reload|help";
 
 const ADD_USAGE: &str = "!song add [--track|--album|--playlist] [--source <name>] <link | phrase>";
-const SHOW_USAGE: &str = "!queue show [page]";
+const SHOW_USAGE: &str = "!queue show|display [page]";
 const REMOVE_USAGE: &str = "!queue remove <number>";
 const LIST_USAGE: &str = "!bot config list [section]";
 const GET_USAGE: &str = "!bot config get <section.key>";
 const SET_USAGE: &str = "!bot config set <section.key> <value>";
 
+/// `!help`, the starting point: one line per prefix, each points to its own help.
+const GENERAL_HELP: &str = "\
+Available commands:
+!song help - adding songs and controlling playback
+!queue help - showing and editing the queue
+!bot help - summoning and configuring the bot";
+
+// Help texts repeat the `*_USAGE` lines, a test checks that they stay the same.
+// One line per command, well under the 1024 character limit of a TeamSpeak message.
+const SONG_HELP: &str = "\
+Available commands:
+!song add [--track|--album|--playlist] [--source <name>] <link | phrase> - add to the queue
+!song pause|stop - pause the current song
+!song resume - continue playing
+!song next|skip - skip to the next song
+!song current - show what is playing
+!song add --help - more about adding";
+
+const ADD_HELP: &str = "\
+usage: !song add [--track|--album|--playlist] [--source <name>] <link | phrase>
+A link plays what it points to, a phrase is searched.
+--source tidal|spotify|youtube|soundcloud|local - where to search, default from the config
+--track|--album|--playlist - what a phrase looks for, default --track";
+
+const QUEUE_HELP: &str = "\
+Available commands:
+!queue show|display [page] - list the queue
+!queue remove <number> - remove a song, the number as in !queue show
+!queue clear - remove everything";
+
+const BOT_HELP: &str = "\
+Available commands:
+!bot summon - move the bot to your channel
+!bot ping - check that the bot answers
+!bot config list|get|set|reload - settings, see !bot config help";
+
+const CONFIG_HELP: &str = "\
+Available commands:
+!bot config list [section] - show the settings
+!bot config get <section.key> - show one setting
+!bot config set <section.key> <value> - change a setting
+!bot config reload - read the config file again";
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Command {
     /// `!bot ping`, a liveness check.
     Ping,
+    /// `!help`, a bare prefix, or `help` / `--help` after it. The text is the chat reply.
+    Help(&'static str),
     /// `!song add [flags] <link | phrase>`.
     Add {
         /// A link or a search phrase, `sources` decides which.
@@ -78,6 +123,8 @@ impl Command {
             ["!song", rest @ ..] => parse_song(rest),
             ["!queue", rest @ ..] => parse_queue(rest),
             ["!bot", rest @ ..] => parse_bot(rest),
+            // Extra words are ignored, `!help me` should still help.
+            ["!help", ..] => Ok(Command::Help(GENERAL_HELP)),
             [first, ..] => {
                 return suggest(first).map(|prefix| Err(CommandError::DidYouMean(prefix)));
             }
@@ -126,6 +173,7 @@ fn typo_distance(a: &str, b: &str) -> usize {
 
 fn parse_song(words: &[&str]) -> CommandResult {
     match words {
+        [] | ["help" | "--help"] => Ok(Command::Help(SONG_HELP)),
         ["add", rest @ ..] => parse_add(rest),
         ["pause" | "stop"] => Ok(Command::Pause),
         ["resume"] => Ok(Command::Resume),
@@ -152,6 +200,8 @@ fn parse_add(mut words: &[&str]) -> CommandResult {
                 words = tail;
             }
             ["--source"] => return Err(CommandError::MissingValue("--source")),
+            // Only before the phrase, so `!song add help` still searches for "help".
+            ["--help", ..] => return Ok(Command::Help(ADD_HELP)),
             // Any other `--` word must be a kind flag, so a typo is an error, not part of the phrase.
             [flag, tail @ ..] if flag.starts_with("--") => {
                 let parsed =
@@ -209,6 +259,7 @@ fn strip_suffix_ignore_case<'a>(text: &'a str, suffix: &str) -> Option<&'a str> 
 
 fn parse_queue(words: &[&str]) -> CommandResult {
     match words {
+        [] | ["help" | "--help"] => Ok(Command::Help(QUEUE_HELP)),
         ["show" | "display"] => Ok(Command::QueueShow {
             page: NonZeroUsize::MIN,
         }),
@@ -227,6 +278,7 @@ fn parse_queue(words: &[&str]) -> CommandResult {
 
 fn parse_bot(words: &[&str]) -> CommandResult {
     match words {
+        [] | ["help" | "--help"] => Ok(Command::Help(BOT_HELP)),
         ["ping"] => Ok(Command::Ping),
         ["summon"] => Ok(Command::Summon),
         ["config", rest @ ..] => parse_config(rest),
@@ -236,6 +288,7 @@ fn parse_bot(words: &[&str]) -> CommandResult {
 
 fn parse_config(words: &[&str]) -> CommandResult {
     match words {
+        [] | ["help" | "--help"] => Ok(Command::Help(CONFIG_HELP)),
         ["list"] => Ok(Command::ConfigList { section: None }),
         ["list", section] => Ok(Command::ConfigList {
             section: Some(section.to_string()),

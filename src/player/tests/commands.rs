@@ -120,3 +120,14 @@ async fn youtube_without_yt_dlp_replies_and_keeps_idle() {
     );
     assert!(h.is_idle());
 }
+
+#[tokio::test]
+async fn help_is_sent_to_the_chat() {
+    let mut h = Harness::new();
+    let help = h.send("!song help").await.unwrap();
+    assert!(
+        help.starts_with("Available commands:\n!song add "),
+        "{help}"
+    );
+    assert!(h.is_idle());
+}

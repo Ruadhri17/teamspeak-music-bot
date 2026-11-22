@@ -23,7 +23,7 @@ fn resume_and_current() {
 fn unknown_song_command() {
     assert_eq!(
         err("!song dodaj x"),
-        CommandError::UnknownCommand("!song add|pause|resume|next|current")
+        CommandError::UnknownCommand("!song add|pause|resume|next|current|help")
     );
 }
 

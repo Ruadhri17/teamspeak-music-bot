@@ -66,14 +66,10 @@ fn config_reload() {
 fn unknown_bot_commands() {
     assert_eq!(
         err("!bot dance"),
-        CommandError::UnknownCommand("!bot summon|config")
-    );
-    assert_eq!(
-        err("!bot config"),
-        CommandError::UnknownCommand("!bot config list|get|set|reload")
+        CommandError::UnknownCommand("!bot summon|ping|config|help")
     );
     assert_eq!(
         err("!bot config delete x"),
-        CommandError::UnknownCommand("!bot config list|get|set|reload")
+        CommandError::UnknownCommand("!bot config list|get|set|reload|help")
     );
 }

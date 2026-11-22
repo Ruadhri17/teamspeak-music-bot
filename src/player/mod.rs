@@ -124,6 +124,7 @@ impl Player {
                 None
             }
             Command::Ping => Some("pong".to_string()),
+            Command::Help(text) => Some(text.to_string()),
             // Listed one by one, so a new command does not compile until it is handled.
             // TODO: `!bot summon` belongs to presence, `!bot config` to the config handler.
             Command::Summon

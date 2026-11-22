@@ -18,7 +18,6 @@ fn normal_chat_is_not_a_command() {
 #[test]
 fn other_prefixes_are_ignored() {
     for text in [
-        "!help",
         "!play x",
         "!stop",
         "!skip",
@@ -78,25 +77,9 @@ fn extra_whitespace_is_ignored() {
 }
 
 #[test]
-fn bare_prefix_lists_its_commands() {
-    assert_eq!(
-        err("!song"),
-        CommandError::UnknownCommand("!song add|pause|resume|next|current")
-    );
-    assert_eq!(
-        err("!queue"),
-        CommandError::UnknownCommand("!queue show|remove|clear")
-    );
-    assert_eq!(
-        err("!bot"),
-        CommandError::UnknownCommand("!bot summon|config")
-    );
-}
-
-#[test]
 fn error_messages_are_ascii_and_short() {
     let errors = [
-        err("!song"),
+        err("!song dance"),
         err("!song add"),
         err("!song add --sorce tidal x"),
         err("!song add --source"),
