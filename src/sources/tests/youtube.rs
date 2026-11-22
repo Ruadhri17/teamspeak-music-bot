@@ -15,8 +15,8 @@ use crate::{
     sources::{
         Location, QueryType, TrackRef,
         youtube::{
-            InvalidVideoId, LinkError, VideoId, YoutubeError, YoutubeLink, open, parse_link,
-            parse_output, resolve,
+            Clients, InvalidVideoId, LinkError, VideoId, YoutubeError, YoutubeLink, open,
+            open_with, parse_link, parse_output, resolve, resolve_with,
         },
     },
 };
@@ -324,10 +324,10 @@ fn config(yt_dlp: &Path) -> YoutubeConfig {
 }
 
 fn open_stream(yt_dlp: &Path) -> Box<dyn Read + Send> {
-    open_with(&config(yt_dlp))
+    open_config(&config(yt_dlp))
 }
 
-fn open_with(config: &YoutubeConfig) -> Box<dyn Read + Send> {
+fn open_config(config: &YoutubeConfig) -> Box<dyn Read + Send> {
     let id = "5NV6Rdv1a3I".parse().unwrap();
     match open(config, &id).unwrap() {
         AudioInput::Stream(reader) => reader,
@@ -438,7 +438,7 @@ fn several_player_clients_are_joined() {
         player_clients: vec!["visionos".into(), "tv_samsung".into()],
         ..config(&path)
     };
-    open_with(&config).read_to_end(&mut Vec::new()).unwrap();
+    open_config(&config).read_to_end(&mut Vec::new()).unwrap();
     assert!(runs(&dir)[0].contains("youtube:player_client=visionos,tv_samsung"));
 }
 
@@ -449,7 +449,7 @@ fn empty_player_clients_leave_the_choice_to_yt_dlp() {
         player_clients: Vec::new(),
         ..config(&path)
     };
-    assert!(open_with(&config).read_to_end(&mut Vec::new()).is_err());
+    assert!(open_config(&config).read_to_end(&mut Vec::new()).is_err());
     let runs = runs(&dir);
     assert_eq!(runs.len(), 3);
     assert!(runs.iter().all(|run| !run.contains("--extractor-args")));
@@ -506,4 +506,63 @@ fn real_open_streams_audio() {
     let mut data = vec![0u8; 100_000];
     reader.read_exact(&mut data).unwrap();
     assert_eq!(&data[..4], [0x1A, 0x45, 0xDF, 0xA3]);
+}
+
+fn open_once(yt_dlp: &Path, clients: Clients) -> Box<dyn Read + Send> {
+    let id = "5NV6Rdv1a3I".parse().unwrap();
+    match open_with(&config(yt_dlp), &id, clients).unwrap() {
+        AudioInput::Stream(reader) => reader,
+        AudioInput::File(_) => panic!("expected a stream"),
+    }
+}
+
+#[test]
+fn open_with_tries_only_once() {
+    let (dir, path) = fake_yt_dlp(&logged("exit 1"));
+    let err = open_once(&path, Clients::Preferred)
+        .read_to_end(&mut Vec::new())
+        .unwrap_err();
+    assert!(err.to_string().contains("yt-dlp exited"), "{err}");
+    assert_eq!(runs(&dir).len(), 1);
+}
+
+#[test]
+fn open_with_uses_the_given_clients() {
+    let (dir, path) = fake_yt_dlp(&logged("printf x"));
+    open_once(&path, Clients::Preferred)
+        .read_to_end(&mut Vec::new())
+        .unwrap();
+    open_once(&path, Clients::Default)
+        .read_to_end(&mut Vec::new())
+        .unwrap();
+    let runs = runs(&dir);
+    assert!(runs[0].contains("youtube:player_client=visionos"));
+    assert!(!runs[1].contains("--extractor-args"));
+}
+
+#[tokio::test]
+async fn resolve_with_tries_only_once() {
+    let (dir, path) = fake_yt_dlp(&logged("exit 1"));
+    let query = QueryType::Phrase("x".to_owned());
+    let result = resolve_with(&config(&path), &query, Clients::Preferred).await;
+    assert!(
+        matches!(result, Err(YoutubeError::Failed { .. })),
+        "{result:?}"
+    );
+    assert_eq!(runs(&dir).len(), 1);
+}
+
+#[tokio::test]
+async fn resolve_with_default_clients_has_no_extractor_args() {
+    let script = format!(
+        r#"cat <<'JSON'
+{VIDEO_JSON}
+JSON"#
+    );
+    let (dir, path) = fake_yt_dlp(&logged(&script));
+    let query = QueryType::Phrase("get lucky".to_owned());
+    resolve_with(&config(&path), &query, Clients::Default)
+        .await
+        .unwrap();
+    assert!(!runs(&dir)[0].contains("--extractor-args"));
 }

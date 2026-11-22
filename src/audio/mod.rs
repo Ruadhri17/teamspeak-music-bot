@@ -17,8 +17,7 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 use crate::config::{AudioConfig, Bitrate, Complexity};
-use decoder::Decoder;
-pub(crate) use decoder::read_tail;
+pub(crate) use decoder::{Decoder, read_tail};
 use encoder::OpusEncoder;
 
 pub const SAMPLE_RATE: usize = 48_000;

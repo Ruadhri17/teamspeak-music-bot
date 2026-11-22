@@ -32,6 +32,18 @@ pub enum Command {
 
     /// Connect to the server and start the bot.
     Run,
+
+    /// Check YouTube playback on this machine, without TeamSpeak.
+    #[command(name = "yt-check")]
+    YtCheck {
+        /// A YouTube link or a search phrase, quotes are optional.
+        #[arg(required = true, num_args = 1..)]
+        query: Vec<String>,
+
+        /// Decode the whole track, not only the first 10 seconds.
+        #[arg(long)]
+        full: bool,
+    },
 }
 
 #[cfg(test)]
@@ -70,5 +82,16 @@ mod tests {
         let cli = Cli::parse_from(["tsmusic", "--log-level", "trace", "run"]);
         assert_eq!(cli.log_level, Some(LogLevel::Trace));
         assert!(Cli::try_parse_from(["tsmusic", "--log-level", "verbose", "run"]).is_err());
+    }
+
+    #[test]
+    fn yt_check_joins_the_query_words() {
+        let cli = Cli::parse_from(["tsmusic", "yt-check", "daft", "punk", "--full"]);
+        let Command::YtCheck { query, full } = cli.command else {
+            panic!("expected yt-check");
+        };
+        assert_eq!(query.join(" "), "daft punk");
+        assert!(full);
+        assert!(Cli::try_parse_from(["tsmusic", "yt-check"]).is_err());
     }
 }

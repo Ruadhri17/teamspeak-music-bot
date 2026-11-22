@@ -131,20 +131,28 @@ pub enum YoutubeError {
 
 /// Finds the track, first with `player_clients`, then with the `yt-dlp` defaults if that fails.
 pub async fn resolve(config: &YoutubeConfig, query: &QueryType) -> Result<TrackRef, YoutubeError> {
+    match resolve_with(config, query, Clients::Preferred).await {
+        Err(YoutubeError::Failed { .. }) if !config.player_clients.is_empty() => {
+            warn!("yt-dlp lookup failed with the preferred clients, retrying with its defaults");
+            resolve_with(config, query, Clients::Default).await
+        }
+        result => result,
+    }
+}
+
+/// One lookup with the given clients, no retry. For `yt-check`, which tests each path on its own.
+pub async fn resolve_with(
+    config: &YoutubeConfig,
+    query: &QueryType,
+    clients: Clients,
+) -> Result<TrackRef, YoutubeError> {
     let target = match query {
         QueryType::Link(url) => match parse_link(url)? {
             YoutubeLink::Video(video_id) => video_id.url(),
         },
         QueryType::Phrase(phrase) => format!("ytsearch1:{phrase}"),
     };
-
-    let json = match lookup(config, &target, Clients::Preferred).await {
-        Err(YoutubeError::Failed { .. }) if !config.player_clients.is_empty() => {
-            warn!("yt-dlp lookup failed with the preferred clients, retrying with its defaults");
-            lookup(config, &target, Clients::Default).await?
-        }
-        result => result?,
-    };
+    let json = lookup(config, &target, clients).await?;
     parse_output(&json)
 }
 
@@ -181,7 +189,7 @@ async fn lookup(
 
 /// Which YouTube clients a `yt-dlp` run may use.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Clients {
+pub enum Clients {
     /// `player_clients` from the config, or the defaults when that is empty.
     Preferred,
     /// Whatever `yt-dlp` chooses, it follows YouTube changes with each release.
@@ -238,17 +246,36 @@ pub(super) fn parse_output(json: &[u8]) -> Result<TrackRef, YoutubeError> {
 /// Starts `yt-dlp` writing the audio of `id` to its stdout, nothing is saved to disk.
 ///
 /// `std::process`, not tokio: the audio side reads it with a plain `Read` on its own thread.
+/// Starts with `player_clients`, retries with the `yt-dlp` defaults while no audio has come.
 pub fn open(config: &YoutubeConfig, id: &VideoId) -> Result<AudioInput, YoutubeError> {
+    start(config, id, Clients::Preferred, OPEN_ATTEMPTS)
+}
+
+/// One attempt with the given clients, no retry. For `yt-check`, which tests each path on its own.
+pub fn open_with(
+    config: &YoutubeConfig,
+    id: &VideoId,
+    clients: Clients,
+) -> Result<AudioInput, YoutubeError> {
+    start(config, id, clients, 1)
+}
+
+/// Spawns the first `yt-dlp`, the reader spawns the rest, up to `attempts` in total.
+fn start(
+    config: &YoutubeConfig,
+    id: &VideoId,
+    clients: Clients,
+    attempts: u32,
+) -> Result<AudioInput, YoutubeError> {
     let stream = Stream {
         config: config.clone(),
         url: id.url(),
     };
-    let running = stream
-        .spawn(Clients::Preferred)
-        .map_err(YoutubeError::Spawn)?;
+    let running = stream.spawn(clients).map_err(YoutubeError::Spawn)?;
     Ok(AudioInput::Stream(Box::new(ChildReader {
         stream,
         attempt: 1,
+        attempts,
         started: false,
         running,
     })))
@@ -300,8 +327,10 @@ impl Stream {
 /// would send it from the beginning again, so a later failure stays an error.
 struct ChildReader {
     stream: Stream,
-    /// Counts from 1, the first attempt uses the preferred clients.
+    /// Counts from 1, retries always use the `yt-dlp` defaults.
     attempt: u32,
+    /// Attempts allowed in total, 1 means no retry.
+    attempts: u32,
     started: bool,
     running: Running,
 }
@@ -316,11 +345,11 @@ impl Read for ChildReader {
             }
             match self.running.finish() {
                 Ok(()) => return Ok(0),
-                Err(_) if !self.started && self.attempt < OPEN_ATTEMPTS => {
+                Err(_) if !self.started && self.attempt < self.attempts => {
                     self.attempt += 1;
                     warn!(
-                        "yt-dlp gave no audio, retrying with its default clients ({}/{OPEN_ATTEMPTS})",
-                        self.attempt
+                        "yt-dlp gave no audio, retrying with its default clients ({}/{})",
+                        self.attempt, self.attempts
                     );
                     // The old process has exited, replacing it reaps it in `Drop`.
                     self.running = self.stream.spawn(Clients::Default)?;
