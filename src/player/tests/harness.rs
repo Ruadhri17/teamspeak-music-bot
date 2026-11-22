@@ -11,7 +11,7 @@ use crate::{
     config::{Config, SourceKind},
     player::{
         Launcher, Player,
-        state::{PlaybackId, State},
+        state::{Ended, PlaybackId, State},
     },
 };
 
@@ -118,7 +118,19 @@ impl Harness {
 
     pub fn finish_current(&mut self) {
         let id = self.current_id();
-        self.player.finished(id);
+        self.player.finished(Ended { id, failure: None });
+    }
+
+    pub fn fail_current(&mut self, reason: &str) {
+        let id = self.current_id();
+        self.player.finished(Ended {
+            id,
+            failure: Some(reason.to_owned()),
+        });
+    }
+
+    pub fn notices(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.player.notices)
     }
 
     pub fn control(&self) -> AudioControl {

@@ -27,7 +27,7 @@ use crate::{
     config::{Config, SourcesConfig, Volume},
 };
 use queue::Queue;
-use state::{PlaybackId, State};
+use state::{Ended, State};
 
 pub struct Player {
     state: State,
@@ -45,9 +45,12 @@ pub struct Player {
     launcher: Box<dyn Launcher>,
     /// Tells the client to hold the frames (pause) or drop a stopped track's frames.
     control: watch::Sender<AudioControl>,
-    /// Audio threads send their ID here when the track ends.
-    done_tx: mpsc::Sender<PlaybackId>,
-    done_rx: mpsc::Receiver<PlaybackId>,
+    /// Audio threads report here when the track ends.
+    done_tx: mpsc::Sender<Ended>,
+    done_rx: mpsc::Receiver<Ended>,
+    /// Messages for the channel that are not replies to a command (a track that could
+    /// not be played), sent after the current event is handled.
+    notices: Vec<String>,
     sources: SourcesConfig,
     /// `!bot volume` above this is refused.
     max_volume: Volume,
@@ -75,6 +78,7 @@ impl Player {
             control,
             done_tx,
             done_rx,
+            notices: Vec::new(),
             sources: config.sources.clone(),
             max_volume: config.audio.max_volume,
         }
@@ -87,8 +91,16 @@ impl Player {
                     Some(event) => self.handle_event(event).await,
                     None => break, // client is gone
                 },
-                Some(id) = self.done_rx.recv() => self.finished(id),
+                Some(ended) = self.done_rx.recv() => self.finished(ended),
             }
+            self.send_notices().await;
+        }
+    }
+
+    /// Notices go to the bot's channel, where the people listening are.
+    async fn send_notices(&mut self) {
+        for text in std::mem::take(&mut self.notices) {
+            self.reply(ReplyTo::Channel, text).await;
         }
     }
 

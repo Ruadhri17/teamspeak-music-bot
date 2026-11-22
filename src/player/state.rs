@@ -8,6 +8,14 @@ use crate::sources::TrackRef;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct PlaybackId(pub(super) u64);
 
+/// Sent from the audio thread when a track ends.
+#[derive(Debug)]
+pub(super) struct Ended {
+    pub(super) id: PlaybackId,
+    /// `Some` when the track failed, with a reason that is safe to show on the chat.
+    pub(super) failure: Option<String>,
+}
+
 /// The current track with everything needed to stop it.
 #[derive(Debug)]
 pub(super) struct Playback {

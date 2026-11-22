@@ -8,13 +8,16 @@ use tracing::warn;
 
 use super::{
     Player,
-    state::{Playback, PlaybackId, State},
+    state::{Ended, Playback, PlaybackId, State},
 };
 use crate::{
-    audio::AudioInput,
+    audio::{AudioError, AudioInput},
     chat,
     config::{SourceKind, Volume},
-    sources::{Location, QueryType, TrackRef, local, youtube},
+    sources::{
+        Location, QueryType, TrackRef, local,
+        youtube::{self, YoutubeError},
+    },
 };
 
 impl Player {
@@ -96,8 +99,14 @@ impl Player {
     }
 
     /// A track finished decoding, its end may still be in the buffer.
-    /// Stale IDs are ignored.
-    pub(super) fn finished(&mut self, id: PlaybackId) {
+    /// Stale IDs are ignored. A failure of the current track goes to the channel.
+    pub(super) fn finished(&mut self, Ended { id, failure }: Ended) {
+        if let (Some(playback), Some(reason)) = (self.state.playback(), failure)
+            && playback.id == id
+        {
+            self.notices
+                .push(could_not_play(&playback.track.title, &reason));
+        }
         match &self.state {
             // `stop_current` is not used, the buffered end must play before the next track.
             State::Playing(playback) if playback.id == id => {
@@ -119,9 +128,10 @@ impl Player {
                     self.start(input, track);
                     return;
                 }
-                // Only logged, there is no command to reply to.
-                // TODO: tell the chat once unavailable Tidal tracks show up here.
-                Err(err) => warn!("skipping {}: {err}", track.title),
+                Err(err) => {
+                    warn!("skipping {}: {err}", track.title);
+                    self.notices.push(could_not_play(&track.title, &err));
+                }
             }
         }
     }
@@ -139,12 +149,13 @@ impl Player {
             id.0,
             stop.clone(),
             Box::new(move |result| {
-                // Only logged, a failed track ends like a finished one and the queue moves on.
-                if let Err(err) = result {
+                // A failed track ends like a finished one and the queue moves on.
+                let failure = result.err().map(|err| {
                     warn!("playback of {title} failed: {err}");
-                }
+                    chat_reason(&err)
+                });
                 // `Err` means the player has stopped, the notification is dropped.
-                let _ = done.blocking_send(id);
+                let _ = done.blocking_send(Ended { id, failure });
             }),
         );
         self.state = State::Playing(Playback { id, stop, track });
@@ -215,4 +226,22 @@ impl Player {
         self.next_id += 1;
         id
     }
+}
+
+/// The title comes from outside the bot, so it is escaped.
+fn could_not_play(title: &str, reason: &str) -> String {
+    format!("could not play {}: {reason}", chat::escape(title))
+}
+
+/// `AudioError` carries ffmpeg output and paths, so only the known messages of the sources
+/// reach the chat (e.g. "this video is age-restricted"), anything else is generic.
+pub(super) fn chat_reason(err: &AudioError) -> String {
+    if let AudioError::Input(err) = err
+        && let Some(err) = err
+            .get_ref()
+            .and_then(|err| err.downcast_ref::<YoutubeError>())
+    {
+        return err.to_string();
+    }
+    "playback failed".to_string()
 }
