@@ -16,6 +16,8 @@ use crate::{
 
 pub type CommandResult = Result<Command, CommandError>;
 
+const PREFIXES: [&str; 3] = ["!song", "!queue", "!bot"];
+
 const SONG_COMMANDS: &str = "!song add|pause|resume|next|current";
 const QUEUE_COMMANDS: &str = "!queue show|remove|clear";
 const BOT_COMMANDS: &str = "!bot summon|config";
@@ -76,10 +78,50 @@ impl Command {
             ["!song", rest @ ..] => parse_song(rest),
             ["!queue", rest @ ..] => parse_queue(rest),
             ["!bot", rest @ ..] => parse_bot(rest),
-            _ => return None,
+            [first, ..] => {
+                return suggest(first).map(|prefix| Err(CommandError::DidYouMean(prefix)));
+            }
+            [] => return None,
         };
         Some(result)
     }
+}
+
+/// A known prefix at most one typo away from `word`, so a mistyped command gets an answer.
+/// Commands of other bots in the channel (`!play`, `!stop`) are further away and stay ignored.
+fn suggest(word: &str) -> Option<&'static str> {
+    if !word.starts_with('!') {
+        return None;
+    }
+    // Lowercase, so `!Song` is answered too.
+    let word = word.to_lowercase();
+    PREFIXES
+        .into_iter()
+        .find(|prefix| typo_distance(&word, prefix) <= 1)
+}
+
+/// Edits needed to turn `a` into `b`: insert, delete or replace a character, or swap two
+/// neighbours (`!snog`), each counts as 1. Counted in characters, not bytes.
+fn typo_distance(a: &str, b: &str) -> usize {
+    let a: Vec<char> = a.chars().collect();
+    let b: Vec<char> = b.chars().collect();
+    // Only three rows of the table are needed: two back for swaps, the previous and the current.
+    let mut two_back = vec![0; b.len() + 1];
+    let mut previous: Vec<usize> = (0..=b.len()).collect();
+    for i in 1..=a.len() {
+        let mut current = vec![i; b.len() + 1];
+        for j in 1..=b.len() {
+            let replace = usize::from(a[i - 1] != b[j - 1]);
+            current[j] = (previous[j] + 1)
+                .min(current[j - 1] + 1)
+                .min(previous[j - 1] + replace);
+            if i > 1 && j > 1 && a[i - 1] == b[j - 2] && a[i - 2] == b[j - 1] {
+                current[j] = current[j].min(two_back[j - 2] + 1);
+            }
+        }
+        two_back = std::mem::replace(&mut previous, current);
+    }
+    previous[b.len()]
 }
 
 fn parse_song(words: &[&str]) -> CommandResult {

@@ -5,6 +5,10 @@ pub enum CommandError {
     #[error("unknown command, try: {0}")]
     UnknownCommand(&'static str),
 
+    /// Unknown prefix one typo away from a known one, e.g. `!sond`.
+    #[error("unknown command, did you mean {0}?")]
+    DidYouMean(&'static str),
+
     /// Known command, wrong arguments.
     #[error("usage: {0}")]
     Usage(&'static str),

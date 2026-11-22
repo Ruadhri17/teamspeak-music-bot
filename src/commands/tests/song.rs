@@ -45,5 +45,5 @@ fn commands_are_case_sensitive() {
         err("!song PAUSE"),
         CommandError::UnknownCommand(_)
     ));
-    assert_eq!(Command::parse("!Song pause"), None);
+    assert_eq!(err("!Song pause"), CommandError::DidYouMean("!song"));
 }
