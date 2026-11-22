@@ -127,6 +127,9 @@ pub enum YoutubeError {
     Json(#[source] serde_json::Error),
     #[error("nothing found on YouTube")]
     NoResults,
+    /// Needs a signed-in account with a confirmed age, no client helps without one.
+    #[error("this video is age-restricted")]
+    AgeRestricted,
 }
 
 /// Finds the track, first with `player_clients`, then with the `yt-dlp` defaults if that fails.
@@ -179,12 +182,23 @@ async fn lookup(
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
         warn!("yt-dlp lookup failed with {}: {stderr}", output.status);
+        if is_age_restricted(&stderr) {
+            return Err(YoutubeError::AgeRestricted);
+        }
         return Err(YoutubeError::Failed {
             status: output.status,
             stderr,
         });
     }
     Ok(output.stdout)
+}
+
+/// The reasons `yt-dlp` gives for an age gate, the same ones it looks for itself (`_is_agegated`).
+fn is_age_restricted(stderr: &str) -> bool {
+    let stderr = stderr.to_ascii_lowercase();
+    ["confirm your age", "age-restricted", "age-verification"]
+        .iter()
+        .any(|reason| stderr.contains(reason))
 }
 
 /// Which YouTube clients a `yt-dlp` run may use.
@@ -345,7 +359,9 @@ impl Read for ChildReader {
             }
             match self.running.finish() {
                 Ok(()) => return Ok(0),
-                Err(_) if !self.started && self.attempt < self.attempts => {
+                Err(failure)
+                    if failure.can_retry() && !self.started && self.attempt < self.attempts =>
+                {
                     self.attempt += 1;
                     warn!(
                         "yt-dlp gave no audio, retrying with its default clients ({}/{})",
@@ -354,7 +370,7 @@ impl Read for ChildReader {
                     // The old process has exited, replacing it reaps it in `Drop`.
                     self.running = self.stream.spawn(Clients::Default)?;
                 }
-                Err(err) => return Err(err),
+                Err(failure) => return Err(failure.into()),
             }
         }
     }
@@ -370,18 +386,47 @@ struct Running {
 
 impl Running {
     /// A stream that ends because `yt-dlp` failed is an error, not the end of the track.
-    fn finish(&mut self) -> io::Result<()> {
-        let status = self.child.wait()?;
-        if let Some(stderr) = self.stderr.take() {
-            let tail = stderr.join().unwrap_or_default();
-            if !status.success() {
-                warn!("yt-dlp failed with {status}: {tail}");
-            }
-        }
+    fn finish(&mut self) -> Result<(), Failure> {
+        let status = self.child.wait().map_err(Failure::Wait)?;
         if status.success() {
-            Ok(())
+            return Ok(());
+        }
+        // Taken once, a second call after the failure only sees the exit status.
+        let tail = self
+            .stderr
+            .take()
+            .map(|stderr| stderr.join().unwrap_or_default())
+            .unwrap_or_default();
+        warn!("yt-dlp failed with {status}: {tail}");
+        if is_age_restricted(&tail) {
+            Err(Failure::AgeRestricted)
         } else {
-            Err(io::Error::other(format!("yt-dlp exited with {status}")))
+            Err(Failure::Exit(status))
+        }
+    }
+}
+
+/// Why a `yt-dlp` stream ended with an error.
+enum Failure {
+    Wait(io::Error),
+    /// Another client does not help, so it is not retried.
+    AgeRestricted,
+    Exit(ExitStatus),
+}
+
+impl Failure {
+    fn can_retry(&self) -> bool {
+        matches!(self, Failure::Exit(_))
+    }
+}
+
+/// The decoder only takes `io::Error`, the message is kept for the log.
+impl From<Failure> for io::Error {
+    fn from(failure: Failure) -> Self {
+        match failure {
+            Failure::Wait(err) => err,
+            Failure::AgeRestricted => io::Error::other(YoutubeError::AgeRestricted),
+            Failure::Exit(status) => io::Error::other(format!("yt-dlp exited with {status}")),
         }
     }
 }

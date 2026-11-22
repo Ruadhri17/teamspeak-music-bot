@@ -566,3 +566,73 @@ JSON"#
         .unwrap();
     assert!(!runs(&dir)[0].contains("--extractor-args"));
 }
+
+const AGE_GATE: &str = "echo 'ERROR: [youtube] Tq92D6wQ1mg: Sign in to confirm your age. This video may be inappropriate for some users.' >&2; exit 1";
+
+#[tokio::test]
+async fn age_restricted_lookup_is_not_retried() {
+    let (dir, path) = fake_yt_dlp(&logged(AGE_GATE));
+    let query = QueryType::Phrase("x".to_owned());
+    let result = resolve(&config(&path), &query).await;
+    assert!(
+        matches!(result, Err(YoutubeError::AgeRestricted)),
+        "{result:?}"
+    );
+    assert_eq!(runs(&dir).len(), 1);
+}
+
+#[test]
+fn age_restricted_stream_is_not_retried() {
+    let (dir, path) = fake_yt_dlp(&logged(AGE_GATE));
+    let err = open_stream(&path).read_to_end(&mut Vec::new()).unwrap_err();
+    assert_eq!(err.to_string(), "this video is age-restricted");
+    assert_eq!(runs(&dir).len(), 1);
+}
+
+#[tokio::test]
+async fn every_age_gate_reason_is_recognised() {
+    for reason in [
+        "Sign in to confirm your age",
+        "This video is age-restricted and YouTube is requiring account age-verification",
+        "SIGN IN TO CONFIRM YOUR AGE",
+    ] {
+        let (_dir, path) = fake_yt_dlp(&format!("echo 'ERROR: {reason}' >&2; exit 1"));
+        let query = QueryType::Phrase("x".to_owned());
+        let result = resolve_with(&config(&path), &query, Clients::Default).await;
+        assert!(
+            matches!(result, Err(YoutubeError::AgeRestricted)),
+            "{reason}: {result:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn other_failures_stay_failed() {
+    let (_dir, path) =
+        fake_yt_dlp("echo 'ERROR: [youtube] x: This video is unavailable' >&2; exit 1");
+    let query = QueryType::Phrase("x".to_owned());
+    let result = resolve_with(&config(&path), &query, Clients::Default).await;
+    assert!(
+        matches!(result, Err(YoutubeError::Failed { .. })),
+        "{result:?}"
+    );
+}
+
+#[test]
+fn age_restricted_message_is_safe_for_the_chat() {
+    assert_eq!(
+        YoutubeError::AgeRestricted.to_string(),
+        "this video is age-restricted"
+    );
+}
+
+#[tokio::test]
+#[ignore = "runs yt-dlp and needs the network"]
+async fn real_age_restricted_video_is_recognised() {
+    let url = Url::parse("https://www.youtube.com/watch?v=Tq92D6wQ1mg").unwrap();
+    let result = resolve(&config(Path::new("yt-dlp")), &QueryType::Link(url)).await;
+    assert!(
+        matches!(result, Err(YoutubeError::AgeRestricted)),
+        "{result:?}"
+    );
+}
