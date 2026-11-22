@@ -21,8 +21,8 @@ bitrate = 96                        # [live] Opus kb/s, range 32-192
 complexity = 10                     # [live] 0-10
 start_buffer = "3s"                 # [live] buffered before a song starts
 max_buffer = "5s"                   # [live] upper limit of the frame buffer
-default_volume = 50                 # [live] 0-100
-max_volume = 100                    # [live] 0-100
+default_volume = 50                 # [live] 0-100, volume after start (logarithmic scale, 50 is about -21 dB)
+max_volume = 100                    # [live] 0-100, highest value allowed for `!bot volume`
 pause_release_after = "5m"          # [live] release the stream after being paused this long
 
 # Events (same as in TS3AudioBot). Every action is optional,

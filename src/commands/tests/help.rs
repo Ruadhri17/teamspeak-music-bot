@@ -1,6 +1,6 @@
 use crate::commands::{
     ADD_HELP, ADD_USAGE, BOT_HELP, CONFIG_HELP, Command, CommandError, GENERAL_HELP, GET_USAGE,
-    LIST_USAGE, QUEUE_HELP, REMOVE_USAGE, SET_USAGE, SHOW_USAGE, SONG_HELP,
+    LIST_USAGE, QUEUE_HELP, REMOVE_USAGE, SET_USAGE, SHOW_USAGE, SONG_HELP, VOLUME_USAGE,
 };
 
 use super::parse::{err, ok};
@@ -67,6 +67,7 @@ fn help_lists_the_same_usage_as_the_errors() {
     for usage in [SHOW_USAGE, REMOVE_USAGE] {
         assert!(QUEUE_HELP.contains(usage), "{usage}");
     }
+    assert!(BOT_HELP.contains(VOLUME_USAGE));
     for usage in [LIST_USAGE, GET_USAGE, SET_USAGE] {
         assert!(CONFIG_HELP.contains(usage), "{usage}");
     }

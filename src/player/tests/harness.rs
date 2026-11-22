@@ -42,6 +42,12 @@ impl Harness {
     }
 
     pub fn with_page_size(page_size: usize) -> Self {
+        Self::with_config(|config| {
+            config.queue.show_page_size = NonZeroUsize::new(page_size).unwrap();
+        })
+    }
+
+    pub fn with_config(edit: impl FnOnce(&mut Config)) -> Self {
         let dir = tempfile::tempdir().unwrap();
         for name in ["a.mp3", "b.mp3", "c.mp3"] {
             fs::write(dir.path().join(name), b"audio").unwrap();
@@ -51,7 +57,7 @@ impl Harness {
         config.sources.default = SourceKind::Local;
         config.sources.local.music_dir = Some(dir.path().to_path_buf());
         config.sources.youtube.yt_dlp_path = dir.path().join("no-yt-dlp");
-        config.queue.show_page_size = NonZeroUsize::new(page_size).unwrap();
+        edit(&mut config);
 
         let (events_tx, events_rx) = mpsc::channel(8);
         let (requests_tx, requests_rx) = mpsc::channel(8);

@@ -49,6 +49,7 @@ Commands from other channels are rejected with a short message.
 | `!queue remove <number>` | Removes the song with that number from the queue |
 | `!queue clear` | Stops the current song and empties the whole queue |
 | `!bot summon` | *(private message)* Brings the bot from its home channel to yours |
+| `!bot volume [0-100]` | Shows the volume, or sets it for all songs |
 | `!bot config list [section]` | *(admins only, private message)* Lists the bot settings |
 | `!bot config get <key>` | *(admins only, private message)* Shows one setting |
 | `!bot config set <key> <value>` | *(admins only, private message)* Changes a bot setting |
@@ -132,6 +133,12 @@ To only skip the current song use `!song next`; to only stop it use `!song pause
 
 Send `!bot summon` to the bot in a private message. If the bot is in its home channel, it joins your channel. If it is busy in another channel, it refuses, unless you are an admin.
 
+### `!bot volume [0-100]`
+
+Without a number, the bot replies with the current volume. With a number, it sets the volume for all songs, for everyone in the channel; a `%` at the end is fine (`!bot volume 40%`). The change is heard right away, also in the middle of a song.
+
+The scale is logarithmic, like most volume controls: 50 is clearly quieter than 100, and below about 20 it gets very quiet. The bot administrator may set a highest allowed volume. The volume goes back to the default when the bot restarts.
+
 ### `!bot config` (admins only)
 
 The bot accepts these commands only from admins, and only in a private message, so that settings are not shown to the whole channel.
@@ -155,7 +162,6 @@ The bot accepts these commands only from admins, and only in a private message, 
 
 These commands are not designed in detail yet:
 
-- `!song volume <0-100>`: change the volume
 - `!song now`: show the current song
 - `!song search <phrase>` and `!song pick <n>`: choose a search result from a list
 - `!help`: list commands

@@ -1,16 +1,18 @@
 //! Audio pipeline: input -> ffmpeg -> PCM f32 48 kHz stereo -> bounded frame buffer
-//! -> Opus -> send. The audio thread fills the buffer, the client takes
+//! -> volume -> Opus -> send. The audio thread fills the buffer, the client takes
 //! one frame every 20 ms.
 //!
-//! The buffer holds PCM, so processing after it applies from the next frame.
+//! The buffer holds PCM, so processing after it (volume) applies from the next frame.
 //!
 //! - `decoder`: ffmpeg as a child process, PCM frames from its stdout
 //! - `encoder`: Opus encoder with the TeamSpeak packet limit
-//! - `output`: encoding of each outgoing frame
+//! - `output`: volume and encoding of each outgoing frame
+//! - `volume`: gain curve and ramp
 
 mod decoder;
 mod encoder;
 mod output;
+pub mod volume;
 
 use std::{
     fs::File,

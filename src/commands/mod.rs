@@ -10,7 +10,7 @@ pub use error::CommandError;
 use std::num::NonZeroUsize;
 
 use crate::{
-    config::SourceKind,
+    config::{SourceKind, Volume},
     sources::{QueryType, SearchKind, parse_query},
 };
 
@@ -20,10 +20,11 @@ const PREFIXES: [&str; 4] = ["!song", "!queue", "!bot", "!help"];
 
 const SONG_COMMANDS: &str = "!song add|pause|resume|next|current|help";
 const QUEUE_COMMANDS: &str = "!queue show|remove|clear|help";
-const BOT_COMMANDS: &str = "!bot summon|ping|config|help";
+const BOT_COMMANDS: &str = "!bot summon|volume|ping|config|help";
 const CONFIG_COMMANDS: &str = "!bot config list|get|set|reload|help";
 
 const ADD_USAGE: &str = "!song add [--track|--album|--playlist] [--source <name>] <link | phrase>";
+const VOLUME_USAGE: &str = "!bot volume [0-100]";
 const SHOW_USAGE: &str = "!queue show|display [page]";
 const REMOVE_USAGE: &str = "!queue remove <number>";
 const LIST_USAGE: &str = "!bot config list [section]";
@@ -35,7 +36,7 @@ const GENERAL_HELP: &str = "\
 Available commands:
 !song help - adding songs and controlling playback
 !queue help - showing and editing the queue
-!bot help - summoning and configuring the bot";
+!bot help - summoning, volume and settings of the bot";
 
 // Help texts repeat the `*_USAGE` lines, a test checks that they stay the same.
 // One line per command, well under the 1024 character limit of a TeamSpeak message.
@@ -63,6 +64,7 @@ Available commands:
 const BOT_HELP: &str = "\
 Available commands:
 !bot summon - move the bot to your channel
+!bot volume [0-100] - show or set the volume for all songs
 !bot ping - check that the bot answers
 !bot config list|get|set|reload - settings, see !bot config help";
 
@@ -96,6 +98,8 @@ pub enum Command {
     Next,
     /// `!song current`.
     Current,
+    /// `!bot volume [0-100]`, `None` shows the current volume. Applies to all songs.
+    Volume(Option<Volume>),
     /// `!queue show [page]`, `!queue display [page]`. Pages count from 1.
     QueueShow { page: NonZeroUsize },
     /// `!queue remove <number>`, the number as shown by `!queue show`.
@@ -281,6 +285,8 @@ fn parse_bot(words: &[&str]) -> CommandResult {
         [] | ["help" | "--help"] => Ok(Command::Help(BOT_HELP)),
         ["ping"] => Ok(Command::Ping),
         ["summon"] => Ok(Command::Summon),
+        ["volume"] => Ok(Command::Volume(None)),
+        ["volume", percent] => volume(percent).map(|volume| Command::Volume(Some(volume))),
         ["config", rest @ ..] => parse_config(rest),
         _ => Err(CommandError::UnknownCommand(BOT_COMMANDS)),
     }
@@ -327,6 +333,16 @@ fn search_kind(flag: &str) -> Option<SearchKind> {
         "--playlist" => Some(SearchKind::Playlist),
         _ => None,
     }
+}
+
+/// 0-100, a `%` at the end is allowed. Anything else answers with the usage.
+fn volume(text: &str) -> Result<Volume, CommandError> {
+    text.strip_suffix('%')
+        .unwrap_or(text)
+        .parse()
+        .ok()
+        .and_then(Volume::new)
+        .ok_or(CommandError::Usage(VOLUME_USAGE))
 }
 
 /// A page or position, counted from 1.

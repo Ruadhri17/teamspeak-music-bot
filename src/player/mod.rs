@@ -24,7 +24,7 @@ use tokio::sync::{mpsc, watch};
 use crate::{
     client::{AudioControl, ClientEvent, ClientRequest, ReplyTo},
     commands::Command,
-    config::{Config, SourcesConfig},
+    config::{Config, SourcesConfig, Volume},
 };
 use queue::Queue;
 use state::{PlaybackId, State};
@@ -49,6 +49,8 @@ pub struct Player {
     done_tx: mpsc::Sender<PlaybackId>,
     done_rx: mpsc::Receiver<PlaybackId>,
     sources: SourcesConfig,
+    /// `!bot volume` above this is refused.
+    max_volume: Volume,
 }
 
 impl Player {
@@ -60,6 +62,8 @@ impl Player {
         config: &Config,
     ) -> Self {
         let (done_tx, done_rx) = mpsc::channel(8);
+        // The player owns the volume, the client only reads it from `control`.
+        control.send_modify(|control| control.volume = config.audio.default_volume);
         Self {
             state: State::Idle,
             queue: Queue::new(config.queue.max_len),
@@ -72,6 +76,7 @@ impl Player {
             done_tx,
             done_rx,
             sources: config.sources.clone(),
+            max_volume: config.audio.max_volume,
         }
     }
 
@@ -117,6 +122,8 @@ impl Player {
                 None
             }
             Command::Current => Some(self.current()),
+            Command::Volume(None) => Some(format!("volume: {}", self.volume().get())),
+            Command::Volume(Some(volume)) => self.set_volume(volume).err(),
             Command::QueueShow { page } => Some(self.queue_show(page)),
             Command::QueueRemove { position } => self.queue_remove(position).err(),
             Command::QueueClear => {

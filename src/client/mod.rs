@@ -29,17 +29,29 @@ use tsproto_packets::packets::{AudioData, CodecType, OutAudio};
 
 use crate::{
     audio::{FRAME_DURATION, Frame, Output},
-    config::Config,
+    config::{Config, Volume},
     secrets::{TeamspeakSecrets, identity},
 };
 
 /// What the client sends right now. Set by the player, read every tick.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AudioControl {
     /// Frames of streams below this are dropped.
     pub drop_before: u64,
     /// While `true`, no frames are sent and they wait in the channel.
     pub paused: bool,
+    /// Applied right before encoding, so a change is heard in the next frame.
+    pub volume: Volume,
+}
+
+impl Default for AudioControl {
+    fn default() -> Self {
+        Self {
+            drop_before: 0,
+            paused: false,
+            volume: Volume::FULL,
+        }
+    }
 }
 
 pub struct Client {
@@ -51,7 +63,7 @@ pub struct Client {
     /// PCM frames from the audio thread, one encoded and sent per tick.
     frames: mpsc::Receiver<Frame>,
     control: watch::Receiver<AudioControl>,
-    /// Opus for the frame that goes out.
+    /// Volume and Opus for the frame that goes out.
     output: Output,
     /// A frame went out since the last end-of-speech packet.
     talking: bool,
@@ -163,8 +175,8 @@ impl Client {
         loop {
             match self.frames.try_recv() {
                 Ok(frame) if frame.stream < control.drop_before => continue,
-                Ok(frame) => {
-                    match self.output.encode(&frame.pcm) {
+                Ok(mut frame) => {
+                    match self.output.encode(&mut frame.pcm, control.volume) {
                         Ok(data) => {
                             self.send_audio(&data);
                             self.talking = true;

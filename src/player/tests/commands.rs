@@ -1,4 +1,5 @@
 use super::harness::Harness;
+use crate::config::Volume;
 
 fn reply(text: &str) -> Option<String> {
     Some(text.to_string())
@@ -146,4 +147,47 @@ async fn titles_cannot_format_the_chat() {
         h.send("!song current").await,
         reply("\\[url=https\\]x\\[b\\]")
     );
+}
+
+#[tokio::test]
+async fn volume_starts_at_the_default_and_is_shown() {
+    let mut h = Harness::new();
+    assert_eq!(h.control().volume, Volume::new(50).unwrap());
+    assert_eq!(h.send("!bot volume").await, reply("volume: 50"));
+}
+
+#[tokio::test]
+async fn setting_the_volume_is_silent_and_reaches_the_client() {
+    let mut h = Harness::new();
+    assert_eq!(h.send("!bot volume 30").await, None);
+    assert_eq!(h.control().volume, Volume::new(30).unwrap());
+    assert_eq!(h.send("!bot volume").await, reply("volume: 30"));
+    assert_eq!(h.send("!bot volume 0").await, None);
+    assert_eq!(h.control().volume, Volume::new(0).unwrap());
+}
+
+#[tokio::test]
+async fn volume_above_the_maximum_is_refused() {
+    let mut h = Harness::with_config(|config| {
+        config.audio.default_volume = Volume::new(20).unwrap();
+        config.audio.max_volume = Volume::new(60).unwrap();
+    });
+    assert_eq!(
+        h.send("!bot volume 61").await,
+        reply("the highest volume is 60")
+    );
+    assert_eq!(h.control().volume, Volume::new(20).unwrap());
+    assert_eq!(h.send("!bot volume 60").await, None);
+    assert_eq!(h.control().volume, Volume::new(60).unwrap());
+}
+
+#[tokio::test]
+async fn volume_does_not_touch_playback() {
+    let mut h = Harness::new();
+    h.add(&["a.mp3"]).await;
+    let stream = h.current_id();
+    assert_eq!(h.send("!bot volume 10").await, None);
+    assert_eq!(h.playing(), Some("a"));
+    assert_eq!(h.current_id(), stream);
+    assert!(!h.control().paused);
 }

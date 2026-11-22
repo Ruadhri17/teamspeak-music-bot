@@ -88,6 +88,8 @@ pub struct Volume(u8);
 
 impl Volume {
     pub const MAX: u8 = 100;
+    /// 100 %, the track as it is.
+    pub const FULL: Self = Self(Self::MAX);
 
     pub const fn new(percent: u8) -> Option<Self> {
         if percent <= Self::MAX {

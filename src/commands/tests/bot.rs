@@ -1,5 +1,8 @@
 use super::parse::{err, ok};
-use crate::commands::{Command, CommandError};
+use crate::{
+    commands::{Command, CommandError},
+    config::Volume,
+};
 
 #[test]
 fn ping_and_summon() {
@@ -66,10 +69,37 @@ fn config_reload() {
 fn unknown_bot_commands() {
     assert_eq!(
         err("!bot dance"),
-        CommandError::UnknownCommand("!bot summon|ping|config|help")
+        CommandError::UnknownCommand("!bot summon|volume|ping|config|help")
     );
     assert_eq!(
         err("!bot config delete x"),
         CommandError::UnknownCommand("!bot config list|get|set|reload|help")
+    );
+}
+
+#[test]
+fn volume_shows_or_sets() {
+    assert_eq!(ok("!bot volume"), Command::Volume(None));
+    for (text, percent) in [("0", 0), ("35", 35), ("100", 100), ("40%", 40)] {
+        assert_eq!(
+            ok(&format!("!bot volume {text}")),
+            Command::Volume(Some(Volume::new(percent).unwrap())),
+            "{text}"
+        );
+    }
+}
+
+#[test]
+fn volume_outside_the_scale_shows_the_usage() {
+    for text in ["101", "-5", "loud", "50.5", "%", "1000", "5%%"] {
+        assert_eq!(
+            err(&format!("!bot volume {text}")),
+            CommandError::Usage("!bot volume [0-100]"),
+            "{text}"
+        );
+    }
+    assert_eq!(
+        err("!bot volume 50 60"),
+        CommandError::UnknownCommand("!bot summon|volume|ping|config|help")
     );
 }

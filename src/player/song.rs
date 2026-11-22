@@ -13,7 +13,7 @@ use super::{
 use crate::{
     audio::AudioInput,
     chat,
-    config::SourceKind,
+    config::{SourceKind, Volume},
     sources::{Location, QueryType, TrackRef, local, youtube},
 };
 
@@ -148,6 +148,20 @@ impl Player {
             }),
         );
         self.state = State::Playing(Playback { id, stop, track });
+    }
+
+    /// The volume the client applies right now.
+    pub(super) fn volume(&self) -> Volume {
+        self.control.borrow().volume
+    }
+
+    /// `!bot volume <n>`. Heard in the next frame, the client applies it right before sending.
+    pub(super) fn set_volume(&mut self, volume: Volume) -> Result<(), String> {
+        if volume > self.max_volume {
+            return Err(format!("the highest volume is {}", self.max_volume.get()));
+        }
+        self.control.send_modify(|control| control.volume = volume);
+        Ok(())
     }
 
     /// Turns a query into a track with the chosen source, or the default one from the config.
