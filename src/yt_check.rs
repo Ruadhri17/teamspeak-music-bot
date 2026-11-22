@@ -119,7 +119,8 @@ fn decode(
     while limit.is_none_or(|limit| audio < limit) {
         if decoder.read_frame()?.is_none() {
             // Only at the real end: `finish` waits for ffmpeg, which runs on after a stop.
-            decoder.finish()?;
+            // `AudioError` already puts its source in the message, `{:#}` would repeat it.
+            decoder.finish().map_err(|err| anyhow::anyhow!("{err}"))?;
             break;
         }
         first_audio.get_or_insert_with(|| start.elapsed());
