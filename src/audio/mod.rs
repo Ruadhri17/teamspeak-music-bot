@@ -18,6 +18,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::config::{AudioConfig, Bitrate, Complexity};
 use decoder::Decoder;
+pub(crate) use decoder::read_tail;
 use encoder::OpusEncoder;
 
 pub const SAMPLE_RATE: usize = 48_000;
@@ -35,8 +36,6 @@ pub enum AudioInput {
     /// with the index at the end, e.g. MP4/M4A with `moov` last, which fail through a pipe.
     File(File),
     /// Data that cannot seek (network, another process), copied into a pipe on a thread.
-    // TODO: remove the `allow` once the YouTube source opens tracks.
-    #[allow(dead_code)]
     Stream(Box<dyn Read + Send>),
 }
 

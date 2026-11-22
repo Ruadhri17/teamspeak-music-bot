@@ -270,12 +270,17 @@ pub enum TidalQuality {
 #[serde(default, deny_unknown_fields)]
 pub struct YoutubeConfig {
     pub yt_dlp_path: PathBuf,
+    /// YouTube clients tried first. If they fail, `yt-dlp` retries with its own defaults.
+    /// Empty = `yt-dlp` always chooses.
+    pub player_clients: Vec<String>,
 }
 
 impl Default for YoutubeConfig {
     fn default() -> Self {
         Self {
             yt_dlp_path: "yt-dlp".into(),
+            // Needs no JS challenges, so audio starts in about 2 s instead of about 9 s.
+            player_clients: vec!["visionos".into()],
         }
     }
 }

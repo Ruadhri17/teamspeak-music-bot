@@ -8,9 +8,12 @@ pub mod local;
 mod soundcloud;
 mod spotify;
 mod tidal;
-mod youtube;
+pub mod youtube;
 
 use std::path::PathBuf;
+
+use url::Url;
+use youtube::VideoId;
 
 /// A song in the queue or playing. Holds no open file or stream.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -25,7 +28,9 @@ pub struct TrackRef {
 pub enum Location {
     /// Relative to `music_dir`, checked again when opened.
     Local(PathBuf),
-    // TODO: Tidal, Youtube, Spotify, Soundcloud with their own IDs.
+
+    Youtube(VideoId),
+    // TODO: Tidal, Spotify, Soundcloud with their own IDs.
 }
 
 /// What a search phrase looks for. Links carry their own type.
@@ -37,6 +42,38 @@ pub enum SearchKind {
     Album,
     /// A public playlist, in its original order.
     Playlist,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum QueryType {
+    Link(Url),
+    Phrase(String),
+}
+
+/// Tells a link from a search phrase. Expects trimmed text with BBCode already removed.
+///
+/// A link without a scheme only counts for a known host.
+/// A link with a scheme stays a link even for an unknown host, resolving rejects it later.
+pub fn parse_query(query: &str) -> QueryType {
+    if query.contains(char::is_whitespace) {
+        return QueryType::Phrase(query.to_owned());
+    }
+    let url = match Url::parse(query) {
+        Ok(url) => Some(url).filter(|url| matches!(url.scheme(), "http" | "https")),
+        Err(url::ParseError::RelativeUrlWithoutBase) => Url::parse(&format!("https://{query}"))
+            .ok()
+            .filter(|url| url.host_str().is_some_and(is_known_host)),
+        Err(_) => None,
+    };
+    match url {
+        Some(url) => QueryType::Link(url),
+        None => QueryType::Phrase(query.to_owned()),
+    }
+}
+
+/// Hosts accepted in a link typed without `https://`.
+fn is_known_host(host: &str) -> bool {
+    youtube::HOSTS.contains(&host)
 }
 
 #[cfg(test)]

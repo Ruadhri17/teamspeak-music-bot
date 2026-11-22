@@ -76,6 +76,9 @@ quality = "high"                    # [live] low | high | lossless
 
 [sources.youtube]
 yt_dlp_path = "yt-dlp"              # [live]
+# YouTube clients tried first, faster than the yt-dlp defaults.
+# If they fail, yt-dlp retries with its own choice. [] = always let yt-dlp choose.
+player_clients = ["visionos"]       # [live]
 
 [sources.local]
 # Folder with local files. Paths outside it are blocked.

@@ -113,7 +113,9 @@ fn symlink_leaving_music_dir_is_not_found() {
 #[test]
 fn open_reads_a_resolved_track() {
     let dir = music_dir();
-    let Location::Local(path) = local::resolve(dir.path(), "song.mp3").unwrap().location;
+    let Location::Local(path) = local::resolve(dir.path(), "song.mp3").unwrap().location else {
+        panic!("wrong location");
+    };
     let AudioInput::File(mut file) = local::open(dir.path(), &path).unwrap() else {
         panic!("a local track opens as a file");
     };

@@ -1,15 +1,25 @@
+use url::Url;
+
 use super::parse::{err, ok};
 use crate::{
     commands::{Command, CommandError},
     config::SourceKind,
-    sources::SearchKind,
+    sources::{QueryType, SearchKind},
 };
 
 fn add(query: &str, source: Option<SourceKind>, kind: SearchKind) -> Command {
     Command::Add {
-        query: query.into(),
+        query: QueryType::Phrase(query.to_owned()),
         source,
         kind,
+    }
+}
+
+fn add_link(link: &str) -> Command {
+    Command::Add {
+        query: QueryType::Link(Url::parse(link).unwrap()),
+        source: None,
+        kind: SearchKind::Track,
     }
 }
 
@@ -22,14 +32,95 @@ fn phrase_without_flags() {
 }
 
 #[test]
-fn single_word_query() {
+fn link_becomes_a_link() {
     assert_eq!(
         ok("!song add https://tidal.com/browse/track/123"),
-        add(
-            "https://tidal.com/browse/track/123",
-            None,
-            SearchKind::Track
-        )
+        add_link("https://tidal.com/browse/track/123")
+    );
+}
+
+#[test]
+fn schemeless_youtube_link_becomes_a_link() {
+    assert_eq!(
+        ok("!song add youtu.be/5NV6Rdv1a3I"),
+        add_link("https://youtu.be/5NV6Rdv1a3I")
+    );
+}
+
+#[test]
+fn ts3_url_tag_is_removed() {
+    assert_eq!(
+        ok("!song add [URL]https://www.youtube.com/watch?v=5NV6Rdv1a3I[/URL]"),
+        add_link("https://www.youtube.com/watch?v=5NV6Rdv1a3I")
+    );
+}
+
+#[test]
+fn url_tag_is_case_insensitive() {
+    assert_eq!(
+        ok("!song add [url]https://youtu.be/5NV6Rdv1a3I[/Url]"),
+        add_link("https://youtu.be/5NV6Rdv1a3I")
+    );
+}
+
+#[test]
+fn url_tag_with_value_gives_the_link_not_the_text() {
+    assert_eq!(
+        ok("!song add [URL=https://youtu.be/5NV6Rdv1a3I]my favourite song[/URL]"),
+        add_link("https://youtu.be/5NV6Rdv1a3I")
+    );
+}
+
+#[test]
+fn url_tag_works_after_flags() {
+    assert_eq!(
+        ok("!song add --source youtube [URL]https://youtu.be/5NV6Rdv1a3I[/URL]"),
+        Command::Add {
+            query: QueryType::Link(Url::parse("https://youtu.be/5NV6Rdv1a3I").unwrap()),
+            source: Some(SourceKind::Youtube),
+            kind: SearchKind::Track,
+        }
+    );
+}
+
+#[test]
+fn id_keeps_its_case_inside_url_tag() {
+    assert_eq!(
+        ok("!song add [URL]https://youtu.be/AbCdEfGhIjK[/URL]"),
+        add_link("https://youtu.be/AbCdEfGhIjK")
+    );
+}
+
+#[test]
+fn half_a_tag_is_left_alone() {
+    assert_eq!(
+        ok("!song add [URL]lofi"),
+        add("[URL]lofi", None, SearchKind::Track)
+    );
+    assert_eq!(
+        ok("!song add lofi[/URL]"),
+        add("lofi[/URL]", None, SearchKind::Track)
+    );
+    assert_eq!(
+        ok("!song add [URL=lofi[/URL]"),
+        add("[URL=lofi[/URL]", None, SearchKind::Track)
+    );
+}
+
+#[test]
+fn tag_in_the_middle_of_a_phrase_is_left_alone() {
+    assert_eq!(
+        ok("!song add songs like [URL]x[/URL] please"),
+        add("songs like [URL]x[/URL] please", None, SearchKind::Track)
+    );
+}
+
+#[test]
+fn multi_byte_text_near_the_tag_does_not_panic() {
+    assert_eq!(ok("!song add żółć"), add("żółć", None, SearchKind::Track));
+    assert_eq!(
+        ok("!song add ąę[/URL"),
+        add("ąę[/URL", None, SearchKind::Track)
     );
 }
 
@@ -105,6 +196,15 @@ fn missing_query() {
     assert_eq!(err("!song add"), usage);
     assert_eq!(err("!song add --album"), usage);
     assert_eq!(err("!song add --source tidal"), usage);
+}
+
+#[test]
+fn empty_url_tag_is_missing_query() {
+    let usage = CommandError::Usage(
+        "!song add [--track|--album|--playlist] [--source <name>] <link | phrase>",
+    );
+    assert_eq!(err("!song add [URL][/URL]"), usage);
+    assert_eq!(err("!song add [URL=]text[/URL]"), usage);
 }
 
 #[test]

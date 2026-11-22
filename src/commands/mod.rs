@@ -9,7 +9,10 @@ pub use error::CommandError;
 
 use std::num::NonZeroUsize;
 
-use crate::{config::SourceKind, sources::SearchKind};
+use crate::{
+    config::SourceKind,
+    sources::{QueryType, SearchKind, parse_query},
+};
 
 pub type CommandResult = Result<Command, CommandError>;
 
@@ -32,7 +35,7 @@ pub enum Command {
     /// `!song add [flags] <link | phrase>`.
     Add {
         /// A link or a search phrase, `sources` decides which.
-        query: String,
+        query: QueryType,
         /// `None` means `sources.default` from the config.
         source: Option<SourceKind>,
         /// Ignored for links, they carry their own type.
@@ -120,14 +123,46 @@ fn parse_add(mut words: &[&str]) -> CommandResult {
         }
     }
 
-    if words.is_empty() {
+    let text = words.join(" ");
+    let text = strip_bbcode(&text).trim();
+    if text.is_empty() {
         return Err(CommandError::Usage(ADD_USAGE));
     }
     Ok(Command::Add {
-        query: words.join(" "),
+        query: parse_query(text),
         source,
         kind: kind.unwrap_or_default(),
     })
+}
+
+/// Removes the `[URL]` tag that TeamSpeak 3 puts around a link filling the whole text.
+/// `[URL=link]text[/URL]` gives the link, not the text shown in the chat.
+fn strip_bbcode(text: &str) -> &str {
+    let Some(inner) = strip_suffix_ignore_case(text, "[/url]") else {
+        return text;
+    };
+    if let Some(link) = strip_prefix_ignore_case(inner, "[url]") {
+        return link;
+    }
+    if let Some((link, _)) =
+        strip_prefix_ignore_case(inner, "[url=").and_then(|rest| rest.split_once(']'))
+    {
+        return link;
+    }
+    text
+}
+
+/// `get` returns `None` instead of panicking when the cut falls inside a multi-byte character.
+fn strip_prefix_ignore_case<'a>(text: &'a str, prefix: &str) -> Option<&'a str> {
+    let head = text.get(..prefix.len())?;
+    head.eq_ignore_ascii_case(prefix)
+        .then(|| &text[prefix.len()..])
+}
+
+fn strip_suffix_ignore_case<'a>(text: &'a str, suffix: &str) -> Option<&'a str> {
+    let start = text.len().checked_sub(suffix.len())?;
+    let tail = text.get(start..)?;
+    tail.eq_ignore_ascii_case(suffix).then(|| &text[..start])
 }
 
 fn parse_queue(words: &[&str]) -> CommandResult {

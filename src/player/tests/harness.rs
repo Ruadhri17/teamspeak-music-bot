@@ -50,6 +50,7 @@ impl Harness {
         let mut config = Config::default();
         config.sources.default = SourceKind::Local;
         config.sources.local.music_dir = Some(dir.path().to_path_buf());
+        config.sources.youtube.yt_dlp_path = dir.path().join("no-yt-dlp");
         config.queue.show_page_size = NonZeroUsize::new(page_size).unwrap();
 
         let (events_tx, events_rx) = mpsc::channel(8);
@@ -72,14 +73,14 @@ impl Harness {
         }
     }
 
-    pub fn send(&mut self, text: &str) -> Option<String> {
+    pub async fn send(&mut self, text: &str) -> Option<String> {
         let command = Command::parse(text).unwrap().unwrap();
-        self.player.execute(command)
+        self.player.execute(command).await
     }
 
-    pub fn add(&mut self, names: &[&str]) {
+    pub async fn add(&mut self, names: &[&str]) {
         for name in names {
-            assert_eq!(self.send(&format!("!song add {name}")), None);
+            assert_eq!(self.send(&format!("!song add {name}")).await, None);
         }
     }
 

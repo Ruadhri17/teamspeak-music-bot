@@ -30,6 +30,17 @@ pub fn validate(config: &Config) -> Result<(), ValidationError> {
         "sources.youtube.yt_dlp_path",
         &config.sources.youtube.yt_dlp_path,
     )?;
+    // Joined into one `--extractor-args` value, so `;` or `=` could add other yt-dlp options.
+    ensure(
+        config.sources.youtube.player_clients.iter().all(|client| {
+            !client.is_empty()
+                && client
+                    .bytes()
+                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
+        }),
+        "sources.youtube.player_clients",
+        || "names may only contain a-z, 0-9 and _".into(),
+    )?;
     optional_path(
         "sources.local.music_dir",
         config.sources.local.music_dir.as_deref(),

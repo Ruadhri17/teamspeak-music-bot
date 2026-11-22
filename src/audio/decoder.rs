@@ -131,7 +131,7 @@ impl Decoder {
 }
 
 /// Reads `reader` to the end, keeping the last `STDERR_TAIL` bytes.
-fn read_tail(reader: &mut impl Read) -> String {
+pub(crate) fn read_tail(reader: &mut impl Read) -> String {
     let mut tail = Vec::new();
     let mut buf = [0u8; 4096];
     while let Ok(n @ 1..) = reader.read(&mut buf) {

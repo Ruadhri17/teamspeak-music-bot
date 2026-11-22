@@ -217,3 +217,30 @@ fn zero_party_delay_and_pause_release_are_valid() {
     config.audio.pause_release_after = Duration::ZERO;
     assert!(validate(&config).is_ok());
 }
+
+#[test]
+fn player_clients_with_unsafe_names_are_rejected() {
+    assert_each_rejected(&[
+        ("sources.youtube.player_clients", |c| {
+            c.sources.youtube.player_clients = vec![String::new()]
+        }),
+        ("sources.youtube.player_clients", |c| {
+            c.sources.youtube.player_clients = vec!["visionos;po_token=x".into()]
+        }),
+        ("sources.youtube.player_clients", |c| {
+            c.sources.youtube.player_clients = vec!["tv,web".into()]
+        }),
+        ("sources.youtube.player_clients", |c| {
+            c.sources.youtube.player_clients = vec!["TV".into()]
+        }),
+    ]);
+}
+
+#[test]
+fn player_clients_may_be_empty_or_several() {
+    let mut config = Config::default();
+    config.sources.youtube.player_clients = Vec::new();
+    assert!(validate(&config).is_ok());
+    config.sources.youtube.player_clients = vec!["visionos".into(), "tv_samsung".into()];
+    assert!(validate(&config).is_ok());
+}

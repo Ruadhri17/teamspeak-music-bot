@@ -13,14 +13,18 @@ use super::{
 use crate::{
     audio::AudioInput,
     config::SourceKind,
-    sources::{Location, TrackRef, local},
+    sources::{Location, QueryType, TrackRef, local, youtube},
 };
 
 impl Player {
     /// `!song add`. Appends to the queue and starts it when nothing plays.
     /// A paused track stays paused. `Err` is the message for the chat.
-    pub(super) fn add(&mut self, query: &str, source: Option<SourceKind>) -> Result<(), String> {
-        let track = self.resolve(query, source)?;
+    pub(super) async fn add(
+        &mut self,
+        query: &QueryType,
+        source: Option<SourceKind>,
+    ) -> Result<(), String> {
+        let track = self.resolve(query, source).await?;
         self.queue.push(track).map_err(|err| err.to_string())?;
         if let State::Idle = self.state {
             self.play_next();
@@ -146,15 +150,24 @@ impl Player {
     /// Turns a query into a track with the chosen source, or the default one from the config.
     // TODO: move to `sources` once there is a `Source` trait, and off the actor loop
     //   (`Loading` state), since network sources take seconds.
-    fn resolve(&self, query: &str, source: Option<SourceKind>) -> Result<TrackRef, String> {
+    async fn resolve(
+        &self,
+        query: &QueryType,
+        source: Option<SourceKind>,
+    ) -> Result<TrackRef, String> {
         match source.unwrap_or(self.sources.default) {
-            SourceKind::Tidal
-            | SourceKind::Spotify
-            | SourceKind::Youtube
-            | SourceKind::Soundcloud => Err("this source is not supported yet".to_string()),
-            SourceKind::Local => {
-                local::resolve(self.music_dir()?, query).map_err(|err| err.to_string())
+            SourceKind::Tidal | SourceKind::Spotify | SourceKind::Soundcloud => {
+                Err("this source is not supported yet".to_string())
             }
+            SourceKind::Youtube => youtube::resolve(&self.sources.youtube, query)
+                .await
+                .map_err(|err| err.to_string()),
+            SourceKind::Local => match query {
+                QueryType::Phrase(path) => {
+                    local::resolve(self.music_dir()?, path).map_err(|err| err.to_string())
+                }
+                QueryType::Link(_) => Err("the local source takes a path, not a link".to_string()),
+            },
         }
     }
 
@@ -163,6 +176,9 @@ impl Player {
         match location {
             Location::Local(path) => {
                 local::open(self.music_dir()?, path).map_err(|err| err.to_string())
+            }
+            Location::Youtube(id) => {
+                youtube::open(&self.sources.youtube, id).map_err(|err| err.to_string())
             }
         }
     }
