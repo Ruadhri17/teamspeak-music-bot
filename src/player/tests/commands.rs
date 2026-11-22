@@ -131,3 +131,19 @@ async fn help_is_sent_to_the_chat() {
     );
     assert!(h.is_idle());
 }
+
+#[tokio::test]
+async fn titles_cannot_format_the_chat() {
+    let mut h = Harness::new();
+    std::fs::write(h.dir.path().join("[url=https]x[b].mp3"), b"audio").unwrap();
+    h.add(&["a.mp3", "[url=https]x[b].mp3"]).await;
+    assert_eq!(
+        h.send("!queue show").await,
+        reply("Now: a\n1. \\[url=https\\]x\\[b\\]")
+    );
+    h.finish_current();
+    assert_eq!(
+        h.send("!song current").await,
+        reply("\\[url=https\\]x\\[b\\]")
+    );
+}

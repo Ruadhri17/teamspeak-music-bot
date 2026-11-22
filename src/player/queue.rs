@@ -3,7 +3,7 @@
 use std::{collections::VecDeque, num::NonZeroUsize};
 
 use super::Player;
-use crate::sources::TrackRef;
+use crate::{chat, sources::TrackRef};
 
 /// Songs waiting after the current one. Positions count from 1, as shown on the chat.
 #[derive(Debug, Default)]
@@ -95,13 +95,13 @@ impl Player {
 
         let mut lines = Vec::new();
         if let Some(playback) = self.state.playback() {
-            lines.push(format!("Now: {}", playback.track.title));
+            lines.push(format!("Now: {}", chat::escape(&playback.track.title)));
         }
         if page.entries.is_empty() {
             lines.push("the queue is empty".to_string());
         }
         for (position, track) in &page.entries {
-            lines.push(format!("{position}. {}", track.title));
+            lines.push(format!("{position}. {}", chat::escape(&track.title)));
         }
         if page.count > 1 {
             lines.push(format!("page {}/{}", page.number, page.count));

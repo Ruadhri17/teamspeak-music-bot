@@ -2,6 +2,7 @@
 //! starting the tasks (TS client, player, presence) and wiring them with channels.
 
 mod audio;
+mod chat;
 mod cli;
 mod client;
 mod commands;

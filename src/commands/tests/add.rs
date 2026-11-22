@@ -258,3 +258,19 @@ fn conflicting_kinds() {
         CommandError::ConflictingKinds
     );
 }
+
+#[test]
+fn typed_words_in_errors_cannot_format_the_chat() {
+    assert_eq!(
+        err("!song add --x[b] y").to_string(),
+        "unknown flag --x\\[b\\], try: --source, --track, --album, --playlist"
+    );
+    assert_eq!(
+        err("!song add --source [url]x y").to_string(),
+        "unknown source \\[url\\]x, try: tidal, spotify, youtube, soundcloud, local"
+    );
+    assert_eq!(
+        err("!queue remove [b]").to_string(),
+        "\\[b\\] is not a positive number"
+    );
+}

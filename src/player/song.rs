@@ -12,6 +12,7 @@ use super::{
 };
 use crate::{
     audio::AudioInput,
+    chat,
     config::SourceKind,
     sources::{Location, QueryType, TrackRef, local, youtube},
 };
@@ -73,8 +74,10 @@ impl Player {
     pub(super) fn current(&self) -> String {
         match &self.state {
             State::Idle => "nothing is playing".to_string(),
-            State::Playing(playback) => playback.track.title.clone(),
-            State::Paused(playback) => format!("{} (paused)", playback.track.title),
+            State::Playing(playback) => chat::escape(&playback.track.title).into_owned(),
+            State::Paused(playback) => {
+                format!("{} (paused)", chat::escape(&playback.track.title))
+            }
         }
     }
 

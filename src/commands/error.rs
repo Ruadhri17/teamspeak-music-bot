@@ -1,4 +1,7 @@
+use crate::chat;
+
 /// Shown on the chat as it is, so every message is short and says how to fix it.
+/// Words the user typed go through `chat::escape`, so they cannot format the reply.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum CommandError {
     /// Known prefix (`!song`, `!queue`, `!bot`), unknown or malformed command after it.
@@ -13,7 +16,7 @@ pub enum CommandError {
     #[error("usage: {0}")]
     Usage(&'static str),
 
-    #[error("unknown flag {0}, try: --source, --track, --album, --playlist")]
+    #[error("unknown flag {}, try: --source, --track, --album, --playlist", chat::escape(.0))]
     UnknownFlag(String),
 
     #[error("{0} needs a value")]
@@ -25,9 +28,9 @@ pub enum CommandError {
     #[error("use only one of --track, --album, --playlist")]
     ConflictingKinds,
 
-    #[error("unknown source {0}, try: tidal, spotify, youtube, soundcloud, local")]
+    #[error("unknown source {}, try: tidal, spotify, youtube, soundcloud, local", chat::escape(.0))]
     UnknownSource(String),
 
-    #[error("{0} is not a positive number")]
+    #[error("{} is not a positive number", chat::escape(.0))]
     InvalidNumber(String),
 }
