@@ -34,7 +34,13 @@ impl Decoder {
         let mut command = Command::new(ffmpeg_path);
         // Defense in depth: only stdin may be read. ffmpeg already refuses the obvious tricks
         // (absolute paths in `concat`, `file://` in playlists), this also covers what it might not.
-        command.args(["-nostdin", "-loglevel", "error", "-protocol_whitelist", "fd,pipe"]);
+        command.args([
+            "-nostdin",
+            "-loglevel",
+            "error",
+            "-protocol_whitelist",
+            "fd,pipe",
+        ]);
         let stream = match input {
             AudioInput::File(file) => {
                 // `fd:` on a regular file can seek, `pipe:` never does.
