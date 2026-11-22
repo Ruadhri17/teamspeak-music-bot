@@ -10,7 +10,7 @@ use std::{
 
 use serde::Deserialize;
 use tokio::process::Command;
-use tracing::warn;
+use tracing::{debug, warn};
 use url::Url;
 
 use crate::{
@@ -181,10 +181,12 @@ async fn lookup(
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
-        warn!("yt-dlp lookup failed with {}: {stderr}", output.status);
+        // A recognised reason is in the error itself, the full output only helps with debugging.
         if is_age_restricted(&stderr) {
+            debug!("yt-dlp lookup failed with {}: {stderr}", output.status);
             return Err(YoutubeError::AgeRestricted);
         }
+        warn!("yt-dlp lookup failed with {}: {stderr}", output.status);
         return Err(YoutubeError::Failed {
             status: output.status,
             stderr,
@@ -397,10 +399,13 @@ impl Running {
             .take()
             .map(|stderr| stderr.join().unwrap_or_default())
             .unwrap_or_default();
-        warn!("yt-dlp failed with {status}: {tail}");
+        // The player logs the failure with the title, the output is only needed when
+        // the reason is not recognised.
         if is_age_restricted(&tail) {
+            debug!("yt-dlp failed with {status}: {tail}");
             Err(Failure::AgeRestricted)
         } else {
+            warn!("yt-dlp failed with {status}: {tail}");
             Err(Failure::Exit(status))
         }
     }
