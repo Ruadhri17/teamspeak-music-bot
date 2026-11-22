@@ -219,9 +219,14 @@ mod tests {
 
     use super::*;
 
+    /// Written by `cp`, not by this process: a test running a program at the same time
+    /// would inherit an open write handle and running the script would fail with ETXTBSY.
     fn script(dir: &TempDir, name: &str, body: &str) -> PathBuf {
         let path = dir.path().join(name);
-        fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
+        let source = dir.path().join(format!("{name}.src"));
+        fs::write(&source, format!("#!/bin/sh\n{body}\n")).unwrap();
+        let copied = Process::new("cp").arg(&source).arg(&path).status().unwrap();
+        assert!(copied.success());
         fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
         path
     }

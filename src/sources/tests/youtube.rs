@@ -311,7 +311,14 @@ async fn missing_yt_dlp_is_a_spawn_error() {
 fn fake_yt_dlp(script: &str) -> (TempDir, PathBuf) {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("yt-dlp");
-    fs::write(&path, format!("#!/bin/sh\n{script}\n")).unwrap();
+    let source = dir.path().join("yt-dlp.src");
+    fs::write(&source, format!("#!/bin/sh\n{script}\n")).unwrap();
+    let copied = std::process::Command::new("cp")
+        .arg(&source)
+        .arg(&path)
+        .status()
+        .unwrap();
+    assert!(copied.success());
     fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
     (dir, path)
 }
