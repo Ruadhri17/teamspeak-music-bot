@@ -1,7 +1,7 @@
 //! Config file model: sections, fields and their defaults.
 //!
 //! Missing fields fall back to `Default`, unknown keys are rejected.
-//! Defaults must match `config.toml.template`.
+//! Defaults must match `config.example.toml`.
 
 use std::{num::NonZeroUsize, path::PathBuf, time::Duration};
 
