@@ -8,7 +8,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::{
     audio::{self, AudioInput, Frame, PlayResult},
-    config::{AudioConfig, Config},
+    config::Config,
 };
 
 /// Starts the playback of one track.
@@ -24,10 +24,9 @@ pub trait Launcher: Send + Sync {
     );
 }
 
-/// Production launcher. Runs the audio thread with ffmpeg and Opus (`audio::play`).
+/// Production launcher. Runs the audio thread with ffmpeg (`audio::play`).
 pub struct AudioLauncher {
     ffmpeg_path: PathBuf,
-    audio: AudioConfig,
     frames: mpsc::Sender<Frame>,
 }
 
@@ -35,7 +34,6 @@ impl AudioLauncher {
     pub fn new(config: &Config, frames: mpsc::Sender<Frame>) -> Self {
         Self {
             ffmpeg_path: config.paths.ffmpeg_path.clone(),
-            audio: config.audio.clone(),
             frames,
         }
     }
@@ -52,7 +50,6 @@ impl Launcher for AudioLauncher {
         audio::play(
             self.ffmpeg_path.clone(),
             input,
-            &self.audio,
             stream,
             self.frames.clone(),
             stop,

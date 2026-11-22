@@ -1,7 +1,10 @@
 //! Opus encoder (audiopus): stereo, 48 kHz, `Application::Audio`, 20 ms frames (960 samples per channel),
 //! bitrate and complexity from the config. Sent as `CodecType::OpusMusic`.
 
-use audiopus::{Application, Channels, SampleRate, coder::Encoder};
+use audiopus::{
+    Application, Channels, SampleRate,
+    coder::{Encoder, GenericCtl},
+};
 
 use super::FRAME_SAMPLES;
 use crate::config::{Bitrate, Complexity};
@@ -17,7 +20,7 @@ pub struct OpusEncoder {
 }
 
 impl OpusEncoder {
-    /// Create one per track, Opus state carries over between frames.
+    /// Opus state carries over between frames, `reset` starts it fresh.
     pub fn new(bitrate: Bitrate, complexity: Complexity) -> audiopus::Result<Self> {
         let mut encoder = Encoder::new(SampleRate::Hz48000, Channels::Stereo, Application::Audio)?;
         // The config is in kb/s, Opus wants b/s. `Bitrate::MAX` (192) * 1000 fits in `i32`.
@@ -35,5 +38,10 @@ impl OpusEncoder {
     pub fn encode(&mut self, frame: &[f32; FRAME_SAMPLES]) -> audiopus::Result<Vec<u8>> {
         let len = self.encoder.encode_float(frame, &mut self.output)?;
         Ok(self.output[..len].to_vec())
+    }
+
+    /// Back to the state of a new encoder.
+    pub fn reset(&mut self) -> audiopus::Result<()> {
+        self.encoder.reset_state()
     }
 }

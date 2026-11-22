@@ -10,10 +10,7 @@ use std::{
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
-use crate::{
-    audio::{AudioError, AudioInput, DoneGuard, Frame, PlayResult, play},
-    config::Config,
-};
+use crate::audio::{AudioError, AudioInput, DoneGuard, Frame, PlayResult, play};
 
 const TIMEOUT: Duration = Duration::from_secs(20);
 
@@ -42,7 +39,6 @@ fn start(ffmpeg: &str, input: AudioInput, capacity: usize) -> Run {
     play(
         PathBuf::from(ffmpeg),
         input,
-        &Config::default().audio,
         7,
         frames_tx,
         stop.clone(),
@@ -60,6 +56,7 @@ fn whole_track_reports_ok_with_tagged_frames() {
     let mut count = 0;
     while let Ok(frame) = run.frames.try_recv() {
         assert_eq!(frame.stream, 7);
+        assert!(frame.pcm.iter().any(|sample| sample.abs() > 0.01));
         count += 1;
     }
     assert!((49..=51).contains(&count), "{count} frames");

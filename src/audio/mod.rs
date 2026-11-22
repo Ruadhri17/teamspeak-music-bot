@@ -1,8 +1,16 @@
-//! Audio pipeline, runs on a dedicated thread outside the async tasks:
-//! input -> ffmpeg -> PCM f32 48 kHz stereo -> volume -> Opus -> bounded frame buffer.
+//! Audio pipeline: input -> ffmpeg -> PCM f32 48 kHz stereo -> bounded frame buffer
+//! -> Opus -> send. The audio thread fills the buffer, the client takes
+//! one frame every 20 ms.
+//!
+//! The buffer holds PCM, so processing after it applies from the next frame.
+//!
+//! - `decoder`: ffmpeg as a child process, PCM frames from its stdout
+//! - `encoder`: Opus encoder with the TeamSpeak packet limit
+//! - `output`: encoding of each outgoing frame
 
 mod decoder;
 mod encoder;
+mod output;
 
 use std::{
     fs::File,
@@ -16,9 +24,8 @@ use std::{
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
-use crate::config::{AudioConfig, Bitrate, Complexity};
 pub(crate) use decoder::{Decoder, read_tail};
-use encoder::OpusEncoder;
+pub use output::Output;
 
 pub const SAMPLE_RATE: usize = 48_000;
 pub const CHANNELS: usize = 2;
@@ -54,47 +61,34 @@ pub enum AudioError {
     #[error("ffmpeg failed ({status}): {stderr}")]
     Ffmpeg { status: ExitStatus, stderr: String },
 
-    #[error("Opus encoder failed: {0}")]
-    Encoder(#[source] audiopus::Error),
-
     #[error("the audio thread panicked")]
     Panicked,
 }
 
 pub type PlayResult = Result<(), AudioError>;
 
-/// One Opus packet and the number of the playback it belongs to.
+/// 20 ms of PCM and the number of the playback it belongs to.
 #[derive(Debug)]
 pub struct Frame {
     pub stream: u64,
-    pub data: Vec<u8>,
+    /// Boxed, so the 7.7 KB of samples is not copied on every move through the channel.
+    pub pcm: Box<[f32; FRAME_SAMPLES]>,
 }
 
-/// Plays `input` on a new thread, pushing Opus packets tagged with `stream` into `frames`
+/// Plays `input` on a new thread, pushing PCM frames tagged with `stream` into `frames`
 /// until the track ends, `stop` is cancelled or the receiver is gone.
 /// Then the thread calls `on_done` with the result, also when it panics.
 pub fn play(
     ffmpeg_path: PathBuf,
     input: AudioInput,
-    audio: &AudioConfig,
     stream: u64,
     frames: mpsc::Sender<Frame>,
     stop: CancellationToken,
     on_done: impl FnOnce(PlayResult) + Send + 'static,
 ) -> JoinHandle<()> {
-    let (bitrate, complexity) = (audio.bitrate, audio.complexity);
-
     std::thread::spawn(move || {
         let done = DoneGuard(Some(on_done));
-        let result = decode(
-            &ffmpeg_path,
-            input,
-            bitrate,
-            complexity,
-            stream,
-            &frames,
-            &stop,
-        );
+        let result = decode(&ffmpeg_path, input, stream, &frames, &stop);
         // A stopped track fails to read once ffmpeg is killed, that is not an error.
         done.finish(if stop.is_cancelled() { Ok(()) } else { result });
     })
@@ -103,21 +97,21 @@ pub fn play(
 fn decode(
     ffmpeg_path: &Path,
     input: AudioInput,
-    bitrate: Bitrate,
-    complexity: Complexity,
     stream: u64,
     frames: &mpsc::Sender<Frame>,
     stop: &CancellationToken,
 ) -> PlayResult {
     let mut decoder = Decoder::spawn(ffmpeg_path, input).map_err(AudioError::Spawn)?;
-    let mut encoder = OpusEncoder::new(bitrate, complexity).map_err(AudioError::Encoder)?;
-    while let Some(frame) = decoder.read_frame().map_err(AudioError::Output)? {
+    while let Some(pcm) = decoder.read_frame().map_err(AudioError::Output)? {
         if stop.is_cancelled() {
             return Ok(());
         }
-        let data = encoder.encode(&frame).map_err(AudioError::Encoder)?;
+        let frame = Frame {
+            stream,
+            pcm: Box::new(pcm),
+        };
         // Blocks while the buffer is full. `Err` means the client is gone.
-        if frames.blocking_send(Frame { stream, data }).is_err() {
+        if frames.blocking_send(frame).is_err() {
             return Ok(());
         }
     }

@@ -28,7 +28,7 @@ use tsclientlib::{Connection, DisconnectOptions, StreamItem};
 use tsproto_packets::packets::{AudioData, CodecType, OutAudio};
 
 use crate::{
-    audio::{FRAME_DURATION, Frame},
+    audio::{FRAME_DURATION, Frame, Output},
     config::Config,
     secrets::{TeamspeakSecrets, identity},
 };
@@ -48,9 +48,11 @@ pub struct Client {
     events: mpsc::Sender<ClientEvent>,
     /// From the rest of the bot.
     requests: mpsc::Receiver<ClientRequest>,
-    /// Opus packets from the audio thread, sent one per tick.
+    /// PCM frames from the audio thread, one encoded and sent per tick.
     frames: mpsc::Receiver<Frame>,
     control: watch::Receiver<AudioControl>,
+    /// Opus for the frame that goes out.
+    output: Output,
     /// A frame went out since the last end-of-speech packet.
     talking: bool,
     /// Where an identity upgraded by tsclientlib is saved.
@@ -77,6 +79,8 @@ impl Client {
             requests,
             frames,
             control,
+            output: Output::new(config.audio.bitrate, config.audio.complexity)
+                .map_err(ClientError::Encoder)?,
             talking: false,
             identity_path,
             shutdown,
@@ -160,8 +164,14 @@ impl Client {
             match self.frames.try_recv() {
                 Ok(frame) if frame.stream < control.drop_before => continue,
                 Ok(frame) => {
-                    self.send_audio(&frame.data);
-                    self.talking = true;
+                    match self.output.encode(&frame.pcm) {
+                        Ok(data) => {
+                            self.send_audio(&data);
+                            self.talking = true;
+                        }
+                        // One lost frame is a short gap, listeners conceal it.
+                        Err(err) => warn!("Opus could not encode a frame: {err}"),
+                    }
                     return;
                 }
                 Err(_) => {
@@ -179,6 +189,9 @@ impl Client {
             // An empty packet ends the voice stream (tsclientlib docs of `send_audio`).
             self.send_audio(&[]);
             self.talking = false;
+            if let Err(err) = self.output.reset() {
+                warn!("Opus encoder could not be reset: {err}");
+            }
         }
     }
 

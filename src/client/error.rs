@@ -14,6 +14,9 @@ pub enum ClientError {
 
     #[error(transparent)]
     Identity(#[from] IdentityError),
+
+    #[error("cannot create the Opus encoder")]
+    Encoder(#[source] audiopus::Error),
 }
 
 pub type ClientResult<T> = Result<T, ClientError>;
