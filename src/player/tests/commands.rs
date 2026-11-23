@@ -57,6 +57,23 @@ async fn queue_remove_counts_from_one_and_is_silent() {
 }
 
 #[tokio::test]
+async fn queue_remove_last_removes_the_end_and_is_silent() {
+    let mut h = Harness::new();
+    h.add(&["a.mp3", "b.mp3", "c.mp3"]).await;
+    assert_eq!(h.send("!queue remove last"), None);
+    assert_eq!(h.queued(), ["b"]);
+    assert_eq!(h.playing(), Some("a"));
+}
+
+#[tokio::test]
+async fn queue_remove_last_leaves_the_current_song() {
+    let mut h = Harness::new();
+    h.add(&["a.mp3"]).await;
+    assert_eq!(h.send("!queue remove last"), reply("the queue is empty"));
+    assert_eq!(h.playing(), Some("a"));
+}
+
+#[tokio::test]
 async fn queue_remove_past_the_end_is_an_error() {
     let mut h = Harness::new();
     h.add(&["a.mp3", "b.mp3"]).await;

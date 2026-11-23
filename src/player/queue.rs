@@ -3,7 +3,7 @@
 use std::{collections::VecDeque, num::NonZeroUsize};
 
 use super::Player;
-use crate::{chat, sources::TrackRef};
+use crate::{chat, commands::QueuePosition, sources::TrackRef};
 
 /// Songs waiting after the current one. Positions count from 1, as shown on the chat.
 #[derive(Debug, Default)]
@@ -52,6 +52,10 @@ impl Queue {
     /// `position` as shown by `!queue show`. `None` when there is no such position.
     pub(super) fn remove(&mut self, position: NonZeroUsize) -> Option<TrackRef> {
         self.tracks.remove(position.get() - 1)
+    }
+
+    pub(super) fn remove_last(&mut self) -> Option<TrackRef> {
+        self.tracks.pop_back()
     }
 
     pub(super) fn clear(&mut self) {
@@ -109,11 +113,17 @@ impl Player {
         lines.join("\n")
     }
 
-    /// `!queue remove <number>`. `Err` is the message for the chat.
-    pub(super) fn queue_remove(&mut self, position: NonZeroUsize) -> Result<(), String> {
-        match self.queue.remove(position) {
-            Some(_) => Ok(()),
-            None => Err(format!("no song at position {position} in the queue")),
+    /// `!queue remove <number>|last`. `Err` is the message for the chat.
+    pub(super) fn queue_remove(&mut self, position: QueuePosition) -> Result<(), String> {
+        match position {
+            QueuePosition::Number(number) => match self.queue.remove(number) {
+                Some(_) => Ok(()),
+                None => Err(format!("no song at position {number} in the queue")),
+            },
+            QueuePosition::Last => match self.queue.remove_last() {
+                Some(_) => Ok(()),
+                None => Err("the queue is empty".to_string()),
+            },
         }
     }
 

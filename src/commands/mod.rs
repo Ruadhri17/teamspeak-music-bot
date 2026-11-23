@@ -26,7 +26,7 @@ const CONFIG_COMMANDS: &str = "!bot config list|get|set|reload|help";
 const ADD_USAGE: &str = "!song add [--track|--album|--playlist] [--source <name>] <link | phrase>";
 const VOLUME_USAGE: &str = "!bot volume [0-100]";
 const SHOW_USAGE: &str = "!queue show|display [page]";
-const REMOVE_USAGE: &str = "!queue remove <number>";
+const REMOVE_USAGE: &str = "!queue remove <number>|last";
 const LIST_USAGE: &str = "!bot config list [section]";
 const GET_USAGE: &str = "!bot config get <section.key>";
 const SET_USAGE: &str = "!bot config set <section.key> <value>";
@@ -58,7 +58,7 @@ A link plays what it points to, a phrase is searched.
 const QUEUE_HELP: &str = "\
 Available commands:
 !queue show|display [page] - list the queue
-!queue remove <number> - remove a song, the number as in !queue show
+!queue remove <number>|last - remove a song by its number in !queue show, or the last one
 !queue clear - remove everything";
 
 const BOT_HELP: &str = "\
@@ -102,8 +102,8 @@ pub enum Command {
     Volume(Option<Volume>),
     /// `!queue show [page]`, `!queue display [page]`. Pages count from 1.
     QueueShow { page: NonZeroUsize },
-    /// `!queue remove <number>`, the number as shown by `!queue show`.
-    QueueRemove { position: NonZeroUsize },
+    /// `!queue remove <number>|last`.
+    QueueRemove { position: QueuePosition },
     /// `!queue clear`.
     QueueClear,
     /// `!bot summon`.
@@ -116,6 +116,15 @@ pub enum Command {
     ConfigSet { key: String, value: String },
     /// `!bot config reload`.
     ConfigReload,
+}
+
+/// A song in the queue, as given to `!queue remove`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QueuePosition {
+    /// As shown by `!queue show`, counted from 1.
+    Number(NonZeroUsize),
+    /// The song at the end of the queue.
+    Last,
 }
 
 impl Command {
@@ -271,8 +280,11 @@ fn parse_queue(words: &[&str]) -> CommandResult {
             page: number(page)?,
         }),
         ["show" | "display", ..] => Err(CommandError::Usage(SHOW_USAGE)),
+        ["remove", "last"] => Ok(Command::QueueRemove {
+            position: QueuePosition::Last,
+        }),
         ["remove", position] => Ok(Command::QueueRemove {
-            position: number(position)?,
+            position: QueuePosition::Number(number(position)?),
         }),
         ["remove", ..] => Err(CommandError::Usage(REMOVE_USAGE)),
         ["clear"] => Ok(Command::QueueClear),

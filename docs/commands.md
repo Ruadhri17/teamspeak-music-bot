@@ -55,6 +55,7 @@ Commands from other channels are rejected with a short message.
 | `!song current` | Shows the song that is playing now |
 | `!queue show` / `!queue display` | Shows the current song and the numbered queue |
 | `!queue remove <number>` | Removes the song with that number from the queue |
+| `!queue remove last` | Removes the last song in the queue |
 | `!queue clear` | Stops the current song and empties the whole queue |
 | `!bot summon` | *(private message)* Brings the bot from its home channel to yours |
 | `!bot volume [0-100]` | Shows the volume, or sets it for all songs |
@@ -142,9 +143,9 @@ Replies with the title of the song that is playing now, with `(paused)` after it
 
 Shows the song that is playing now and the upcoming songs, numbered from 1. A long queue is split into pages: `!queue show 2` shows the second page.
 
-### `!queue remove <number>`
+### `!queue remove <number>` / `!queue remove last`
 
-Removes the song with the given number, as shown by `!queue show`. To skip the song that is playing now, use `!song next`.
+Removes the song with the given number, as shown by `!queue show`. `!queue remove last` removes the song at the end of the queue, for example one you have just added by mistake, without looking up its number. To skip the song that is playing now, use `!song next`.
 
 ### `!queue clear`
 

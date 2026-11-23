@@ -1,7 +1,7 @@
 use std::num::NonZeroUsize;
 
 use super::parse::{err, ok};
-use crate::commands::{Command, CommandError};
+use crate::commands::{Command, CommandError, QueuePosition};
 
 fn n(value: usize) -> NonZeroUsize {
     NonZeroUsize::new(value).unwrap()
@@ -42,13 +42,37 @@ fn show_rejects_bad_pages() {
 fn remove() {
     assert_eq!(
         ok("!queue remove 5"),
-        Command::QueueRemove { position: n(5) }
+        Command::QueueRemove {
+            position: QueuePosition::Number(n(5))
+        }
+    );
+}
+
+#[test]
+fn remove_last() {
+    assert_eq!(
+        ok("!queue remove last"),
+        Command::QueueRemove {
+            position: QueuePosition::Last
+        }
+    );
+}
+
+#[test]
+fn remove_takes_a_number_or_last() {
+    assert_eq!(
+        err("!queue remove first"),
+        CommandError::InvalidNumber("first".into())
+    );
+    assert_eq!(
+        err("!queue remove last 2"),
+        CommandError::Usage("!queue remove <number>|last")
     );
 }
 
 #[test]
 fn remove_needs_one_number() {
-    let usage = CommandError::Usage("!queue remove <number>");
+    let usage = CommandError::Usage("!queue remove <number>|last");
     assert_eq!(err("!queue remove"), usage);
     assert_eq!(err("!queue remove 1 2"), usage);
     assert_eq!(
