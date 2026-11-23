@@ -10,6 +10,7 @@
 [teamspeak]
 address = "localhost"               # [restart] host, host:port, IP or server nickname (default port 9987)
 nickname = "MusicBot"               # [live]
+# The bot needs the server permission b_client_modify_own_description to set it.
 description = "Exemplary description"   # [live]
 identity_file = "identity.toml"     # [restart] relative to paths.state_dir
 # Bot's home channel: ID or name/path ("Parent/Channel").

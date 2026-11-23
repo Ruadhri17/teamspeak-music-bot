@@ -55,12 +55,12 @@ impl Player {
             let found = match entry.result.expect("only finished entries are taken") {
                 Ok(found) => found,
                 Err(text) => {
-                    self.outbox.push((entry.reply_to, text));
+                    self.say(entry.reply_to, text);
                     continue;
                 }
             };
             if let Some(text) = self.enqueue_found(found) {
-                self.outbox.push((entry.reply_to, text));
+                self.say(entry.reply_to, text);
             }
         }
     }
@@ -166,10 +166,8 @@ impl Player {
         if let (Some(playback), Some(reason)) = (self.state.playback(), failure)
             && playback.id == id
         {
-            self.outbox.push((
-                ReplyTo::Channel,
-                could_not_play(&playback.track.title, &reason),
-            ));
+            let text = could_not_play(&playback.track.title, &reason);
+            self.say(ReplyTo::Channel, text);
         }
         match &self.state {
             // `stop_current` is not used, the buffered end must play before the next track.
@@ -194,8 +192,7 @@ impl Player {
                 }
                 Err(err) => {
                     warn!("skipping {}: {err}", track.title);
-                    self.outbox
-                        .push((ReplyTo::Channel, could_not_play(&track.title, &err)));
+                    self.say(ReplyTo::Channel, could_not_play(&track.title, &err));
                 }
             }
         }

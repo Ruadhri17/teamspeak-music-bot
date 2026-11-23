@@ -57,7 +57,7 @@ pub struct Player {
     done_tx: mpsc::Sender<Ended>,
     done_rx: mpsc::Receiver<Ended>,
     /// Messages that are not direct replies to a command, sent after the current event is handled.
-    outbox: Vec<(ReplyTo, String)>,
+    outbox: Vec<ClientRequest>,
     sources: SourcesConfig,
     /// `!bot volume` above this is refused.
     max_volume: Volume,
@@ -107,21 +107,32 @@ impl Player {
         }
     }
 
-    /// Sends the outbox, each message to its own recipient.
+    /// Sends the outbox to the client, in order.
     async fn send_outbox(&mut self) {
-        for (to, text) in std::mem::take(&mut self.outbox) {
-            self.reply(to, text).await;
+        for request in std::mem::take(&mut self.outbox) {
+            // `Err` means the client has stopped, the request is dropped.
+            let _ = self.requests.send(request).await;
         }
     }
 
+    /// Queues a chat message for `send_outbox`.
+    fn say(&mut self, to: ReplyTo, text: String) {
+        self.outbox.push(ClientRequest::SendMessage { to, text });
+    }
+
     async fn handle_event(&mut self, event: ClientEvent) {
-        let ClientEvent::Message { reply_to, text, .. } = event;
+        let ClientEvent::Message {
+            reply_to,
+            sender_id,
+            text,
+            ..
+        } = event;
 
         let Some(parsed) = Command::parse(&text) else {
             return;
         };
         let reply = match parsed {
-            Ok(command) => self.execute(command, reply_to),
+            Ok(command) => self.execute(command, reply_to, sender_id),
             Err(err) => Some(err.to_string()),
         };
         if let Some(text) = reply {
@@ -131,7 +142,7 @@ impl Player {
 
     /// Runs a command and returns the chat reply, if any.
     /// Success is silent, except for informational commands.
-    fn execute(&mut self, command: Command, reply_to: ReplyTo) -> Option<String> {
+    fn execute(&mut self, command: Command, reply_to: ReplyTo, sender_id: u16) -> Option<String> {
         match command {
             Command::Add { query, source, .. } => {
                 self.add(query, source, reply_to);
@@ -157,10 +168,17 @@ impl Player {
             }
             Command::Ping => Some("pong".to_string()),
             Command::Help(text) => Some(text.to_string()),
+            // The client knows the channels, it decides and answers.
+            Command::Summon => {
+                self.outbox.push(ClientRequest::Summon {
+                    sender_id,
+                    reply_to,
+                });
+                None
+            }
             // Listed one by one, so a new command does not compile until it is handled.
-            // TODO: `!bot summon` belongs to presence, `!bot config` to the config handler.
-            Command::Summon
-            | Command::ConfigList { .. }
+            // TODO: `!bot config` belongs to the config handler.
+            Command::ConfigList { .. }
             | Command::ConfigGet { .. }
             | Command::ConfigSet { .. }
             | Command::ConfigReload => None,

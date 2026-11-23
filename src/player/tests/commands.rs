@@ -1,5 +1,8 @@
 use super::harness::{Harness, on_channel};
-use crate::config::Volume;
+use crate::{
+    client::{ClientRequest, ReplyTo},
+    config::Volume,
+};
 
 fn reply(text: &str) -> Option<String> {
     Some(text.to_string())
@@ -104,11 +107,26 @@ async fn ping_answers_pong() {
 }
 
 #[tokio::test]
-async fn bot_commands_are_not_handled_by_the_player() {
+async fn config_commands_are_not_handled_by_the_player() {
     let mut h = Harness::new();
-    assert_eq!(h.send("!bot summon"), None);
     assert_eq!(h.send("!bot config list"), None);
     assert_eq!(h.send("!bot config reload"), None);
+    assert!(h.client_requests().is_empty());
+}
+
+#[tokio::test]
+async fn summon_is_passed_to_the_client_with_the_sender() {
+    let mut h = Harness::new();
+    let sender = ReplyTo::Client(7);
+    assert_eq!(h.send_from(sender, "!bot summon"), None);
+    assert_eq!(
+        h.client_requests(),
+        [ClientRequest::Summon {
+            sender_id: 7,
+            reply_to: sender,
+        }]
+    );
+    assert!(h.is_idle());
 }
 
 #[tokio::test]

@@ -3,19 +3,23 @@
 //!
 //! - `connect`: building the connection from the config
 //! - `event`: `ClientEvent` and translation from tsclientlib events
+//! - `home`: the home channel and the decision for `!bot summon`
 //! - `request`: `ClientRequest` and executing it on the connection
 //! - `error`: `ClientError` for the whole module
 
 mod connect;
 mod error;
 mod event;
+mod home;
 mod request;
+#[cfg(test)]
+mod tests;
 
 pub use error::{ClientError, ClientResult};
 pub use event::{ClientEvent, ReplyTo};
 pub use request::ClientRequest;
 
-use std::path::PathBuf;
+use std::{collections::HashMap, path::PathBuf};
 
 use futures::{StreamExt, future};
 use tokio::{
@@ -23,13 +27,18 @@ use tokio::{
     time::MissedTickBehavior,
 };
 use tokio_util::sync::CancellationToken;
-use tracing::warn;
-use tsclientlib::{Connection, DisconnectOptions, StreamItem};
+use tracing::{info, warn};
+use tsclientlib::{
+    ChannelId, CommandError, Connection, DisconnectOptions, InMessage, MessageHandle,
+    OutCommandExt, StreamItem, prelude::M2BClientEditExt,
+};
 use tsproto_packets::packets::{AudioData, CodecType, OutAudio};
+
+use home::ChannelInfo;
 
 use crate::{
     audio::{FRAME_DURATION, Frame, Output},
-    config::{Config, Volume},
+    config::{ChannelRef, Config, Volume},
     secrets::{TeamspeakSecrets, identity},
 };
 
@@ -70,6 +79,13 @@ pub struct Client {
     talking: bool,
     /// Where an identity upgraded by tsclientlib is saved.
     identity_path: PathBuf,
+    /// `home_channel` from the config, `None` = the server's default channel.
+    home_config: Option<ChannelRef>,
+    /// Known once connected, forgotten on a reconnect.
+    home: Option<ChannelId>,
+    description: String,
+    /// Commands waiting for the server's answer, with a label for the log.
+    sent: HashMap<MessageHandle, &'static str>,
     shutdown: CancellationToken,
 }
 
@@ -96,6 +112,10 @@ impl Client {
                 .map_err(ClientError::Encoder)?,
             talking: false,
             identity_path,
+            home_config: config.teamspeak.home_channel.clone(),
+            home: None,
+            description: config.teamspeak.description.clone(),
+            sent: HashMap::new(),
             shutdown,
         })
     }
@@ -118,8 +138,9 @@ impl Client {
                 },
                 // Only logged, a broken connection is reported by the `events()` branch.
                 Some(request) = self.requests.recv() => {
-                    if let Err(err) = request::execute(&mut self.connection, request) {
-                        warn!("{:#}", anyhow::Error::from(err));
+                    match request::execute(&mut self.connection, self.home, request) {
+                        Ok(sent) => self.track(sent),
+                        Err(err) => warn!("{:#}", anyhow::Error::from(err)),
                     }
                 }
                 _ = ticker.tick() => self.send_frame(),
@@ -131,11 +152,103 @@ impl Client {
     }
 
     async fn handle_item(&mut self, item: StreamItem) {
-        // TODO: `DisconnectedTemporarily` (tsclientlib reconnects on its own), log it at warn.
         match item {
             StreamItem::BookEvents(events) => self.forward_events(events).await,
+            // The channel tree is complete only after this, earlier book events have a part of it.
+            StreamItem::MessageEvent(InMessage::ChannelListFinished(_)) => self.on_connected(),
             StreamItem::IdentityLevelIncreased => self.save_identity(),
+            StreamItem::MessageResult(handle, result) => self.command_done(handle, result),
+            // tsclientlib reconnects on its own, the setup runs again after that.
+            StreamItem::DisconnectedTemporarily(reason) => {
+                warn!("disconnected from the server ({reason:?}), reconnecting");
+                self.home = None;
+                // Commands of the old connection get no answer.
+                self.sent.clear();
+            }
             _ => {}
+        }
+    }
+
+    fn track(&mut self, sent: Option<request::Sent>) {
+        if let Some((handle, label)) = sent {
+            self.sent.insert(handle, label);
+        }
+    }
+
+    /// A refusal usually means the server permissions of the bot need fixing.
+    fn command_done(&mut self, handle: MessageHandle, result: Result<(), CommandError>) {
+        let label = self.sent.remove(&handle).unwrap_or("a command");
+        if let Err(err) = result {
+            match err.missing_permission {
+                Some(permission) => {
+                    warn!("the server refused {label}: {err}, missing permission {permission:?}")
+                }
+                None => warn!("the server refused {label}: {err}"),
+            }
+        }
+    }
+
+    /// Runs once the channel list is complete: finds the home channel, subscribes to all
+    /// channels and sets the description.
+    fn on_connected(&mut self) {
+        let Ok(state) = self.connection.get_state() else {
+            return;
+        };
+        let channels: Vec<ChannelInfo> = state
+            .channels
+            .values()
+            .map(|channel| ChannelInfo {
+                id: channel.id.0,
+                parent: channel.parent.0,
+                name: &channel.name,
+                is_default: channel.is_default.unwrap_or(false),
+            })
+            .collect();
+        let current = state.clients.get(&state.own_client).map(|bot| bot.channel);
+
+        let home = match home::resolve(self.home_config.as_ref(), &channels) {
+            Some(id) => ChannelId(id),
+            None => {
+                warn!(
+                    "teamspeak.home_channel not found on the server, the current channel is home"
+                );
+                match current {
+                    Some(channel) => channel,
+                    None => return,
+                }
+            }
+        };
+        let name = state
+            .channels
+            .get(&home)
+            .map_or("", |channel| channel.name.as_str());
+        info!("home channel: {name} ({})", home.0);
+        if current.is_some_and(|channel| channel != home) {
+            // The server puts the bot in the default channel when it cannot join the configured one.
+            warn!(
+                "the bot is not in teamspeak.home_channel, check its password and join permissions"
+            );
+        }
+        self.home = Some(home);
+
+        // Clients in other channels are only visible in subscribed channels, `!bot summon`
+        // needs the sender's channel. tsclientlib subscribes new channels on its own after this.
+        let subscribe = state.server.set_subscribed(true);
+        // A copy, so the command does not borrow `self` while the results are tracked.
+        let description = self.description.clone();
+        let edit = state
+            .clients
+            .get(&state.own_client)
+            .map(|bot| bot.edit().set_description(&description));
+        match subscribe.send_with_result(&mut self.connection) {
+            Ok(handle) => self.track(Some((handle, "subscribing to all channels"))),
+            Err(err) => warn!("could not subscribe to all channels: {err}"),
+        }
+        if let Some(edit) = edit {
+            match edit.send_with_result(&mut self.connection) {
+                Ok(handle) => self.track(Some((handle, "setting the description"))),
+                Err(err) => warn!("the description could not be set: {err}"),
+            }
         }
     }
 

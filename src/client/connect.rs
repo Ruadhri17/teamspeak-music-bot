@@ -34,7 +34,7 @@ pub fn connect(
         None => options,
     };
 
-    // TODO: the description is not a connect option, set it with a request after connecting.
+    // The description is not a connect option, `Client` sets it once connected.
     options
         .connect()
         .map_err(|source| ClientError::Connect(source.into()))

@@ -157,7 +157,7 @@ To only skip the current song use `!song next`; to only stop it use `!song pause
 
 ### `!bot summon`
 
-Send `!bot summon` to the bot in a private message. If the bot is in its home channel, it joins your channel. If it is busy in another channel, it refuses, unless you are an admin.
+Send `!bot summon` to the bot in a private message. If the bot is in its home channel, it joins your channel. If it is busy in another channel, it refuses, unless you are an admin. Sent in the channel chat it does nothing: you are already in the bot's channel.
 
 ### `!bot volume [0-100]`
 

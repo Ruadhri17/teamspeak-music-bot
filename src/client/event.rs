@@ -6,6 +6,8 @@ pub enum ClientEvent {
     /// Chat message in the bot's channel, a private message or a poke to the bot.
     Message {
         reply_to: ReplyTo,
+        /// The sender's client ID on the server, valid while they stay connected.
+        sender_id: u16,
         sender_name: String,
         text: String,
     },
@@ -45,6 +47,7 @@ pub fn translate(event: &Event, bot_id: ClientId) -> Option<ClientEvent> {
             };
             Some(ClientEvent::Message {
                 reply_to,
+                sender_id: invoker.id.0,
                 sender_name: invoker.name.clone(),
                 text: message.clone(),
             })

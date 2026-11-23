@@ -112,8 +112,12 @@ impl Harness {
     }
 
     pub fn send_from(&mut self, reply_to: ReplyTo, text: &str) -> Option<String> {
+        let sender_id = match reply_to {
+            ReplyTo::Client(id) => id,
+            ReplyTo::Channel => 1,
+        };
         let command = Command::parse(text).unwrap().unwrap();
-        self.player.execute(command, reply_to)
+        self.player.execute(command, reply_to, sender_id)
     }
 
     pub async fn next_lookup(&mut self) {
@@ -180,6 +184,16 @@ impl Harness {
     }
 
     pub fn outbox(&mut self) -> Vec<(ReplyTo, String)> {
+        self.client_requests()
+            .into_iter()
+            .map(|request| match request {
+                ClientRequest::SendMessage { to, text } => (to, text),
+                other => panic!("not a message: {other:?}"),
+            })
+            .collect()
+    }
+
+    pub fn client_requests(&mut self) -> Vec<ClientRequest> {
         std::mem::take(&mut self.player.outbox)
     }
 
