@@ -11,6 +11,7 @@ mod logging;
 mod permissions;
 mod player;
 mod presence;
+mod process;
 mod secrets;
 mod sources;
 mod yt_check;

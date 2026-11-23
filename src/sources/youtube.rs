@@ -17,6 +17,7 @@ use url::Url;
 use crate::{
     audio::{AudioInput, read_tail},
     config::YoutubeConfig,
+    process::{self, TermOnDrop},
     sources::{Found, Location, Playlist, QueryType, TrackRef},
 };
 
@@ -229,12 +230,15 @@ async fn lookup(
     if let Some(limit) = limit {
         cmd.arg("--playlist-items").arg(format!("1:{limit}"));
     }
-    cmd.arg("--").arg(target).stdin(Stdio::null());
-    let mut cmd = Command::from(cmd);
-    // `timeout` drops the future when time runs out, this kills the process with it.
-    cmd.kill_on_drop(true);
+    cmd.arg("--")
+        .arg(target)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    // Stopped when the lookup is dropped: on timeout or when its task is aborted.
+    let mut child = TermOnDrop::new(Command::from(cmd).spawn().map_err(YoutubeError::Spawn)?);
 
-    let output = tokio::time::timeout(LOOKUP_TIMEOUT, cmd.output())
+    let output = tokio::time::timeout(LOOKUP_TIMEOUT, child.output())
         .await
         .map_err(|_| YoutubeError::Timeout)?
         .map_err(YoutubeError::Spawn)?;
@@ -466,7 +470,7 @@ impl Read for ChildReader {
     }
 }
 
-/// One running `yt-dlp`. Dropping it kills the process.
+/// One running `yt-dlp`. Dropping it stops the process, see `process::stop`.
 struct Running {
     child: Child,
     stdout: ChildStdout,
@@ -526,8 +530,7 @@ impl From<Failure> for io::Error {
 
 impl Drop for Running {
     fn drop(&mut self) {
-        // Kills `yt-dlp` if the track was skipped and reaps it to avoid a zombie process.
-        let _ = self.child.kill();
-        let _ = self.child.wait();
+        // Stops `yt-dlp` if the track was skipped and reaps it to avoid a zombie process.
+        process::stop(&mut self.child);
     }
 }
