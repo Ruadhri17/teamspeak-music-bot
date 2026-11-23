@@ -231,6 +231,24 @@ impl Client {
         }
         self.home = Some(home);
 
+        // Shows whether the server group meant for the bot was kept after a restart.
+        if let Some(bot) = state.clients.get(&state.own_client) {
+            let groups: Vec<String> = bot
+                .server_groups
+                .iter()
+                .map(|id| match state.server_groups.get(id) {
+                    Some(group) if group.is_permanent => format!("{} ({})", group.name, id.0),
+                    Some(group) => format!("{} ({}, not saved)", group.name, id.0),
+                    None => format!("({})", id.0),
+                })
+                .collect();
+            info!(
+                "bot database ID {}, server groups: {}",
+                bot.database_id.0,
+                groups.join(", ")
+            );
+        }
+
         // Clients in other channels are only visible in subscribed channels, `!bot summon`
         // needs the sender's channel. tsclientlib subscribes new channels on its own after this.
         let subscribe = state.server.set_subscribed(true);
