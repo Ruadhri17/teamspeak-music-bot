@@ -1,6 +1,6 @@
 use std::fs;
 
-use super::harness::Harness;
+use super::harness::{Harness, on_channel};
 use crate::player::state::Ended;
 
 #[tokio::test]
@@ -34,8 +34,8 @@ async fn add_while_paused_stays_paused() {
 async fn add_missing_file_is_an_error_and_changes_nothing() {
     let mut h = Harness::new();
     assert_eq!(
-        h.send("!song add nope.mp3").await,
-        Some("no such file in the music directory".to_string())
+        h.add_outbox("!song add nope.mp3").await,
+        on_channel("no such file in the music directory")
     );
     assert!(h.is_idle());
     assert!(h.queued().is_empty());

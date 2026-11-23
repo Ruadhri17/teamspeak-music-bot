@@ -1,8 +1,9 @@
 //! Player state and playback IDs.
 
+use tokio::task::Id;
 use tokio_util::sync::CancellationToken;
 
-use crate::sources::TrackRef;
+use crate::{client::ReplyTo, sources::TrackRef};
 
 /// Identifies one playback, so a late "finished" from an old track can be told apart.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -25,7 +26,7 @@ pub(super) struct Playback {
 }
 
 /// `Default` (`Idle`) is required by `mem::take`.
-// TODO: `Loading` for Tidal, `Departing` for presence.
+// TODO: `Departing` for presence.
 #[derive(Debug, Default)]
 pub(super) enum State {
     #[default]
@@ -42,4 +43,15 @@ impl State {
             State::Playing(playback) | State::Paused(playback) => Some(playback),
         }
     }
+}
+
+/// A `!song add` whose lookup runs in `Player::lookups`, kept in the order of the commands.
+#[derive(Debug)]
+pub(super) struct Pending {
+    /// The lookup task, matched with the ID that `join_next_with_id` returns.
+    pub(super) task: Id,
+    /// Where an error goes, the place the command came from.
+    pub(super) reply_to: ReplyTo,
+    /// `None` while the lookup runs.
+    pub(super) result: Option<Result<TrackRef, String>>,
 }

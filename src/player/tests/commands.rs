@@ -1,4 +1,4 @@
-use super::harness::Harness;
+use super::harness::{Harness, on_channel};
 use crate::config::Volume;
 
 fn reply(text: &str) -> Option<String> {
@@ -105,8 +105,9 @@ async fn unsupported_source_replies_and_keeps_idle() {
     let mut h = Harness::new();
     for source in ["tidal", "spotify", "soundcloud"] {
         assert_eq!(
-            h.send(&format!("!song add --source {source} x")).await,
-            reply("this source is not supported yet")
+            h.add_outbox(&format!("!song add --source {source} x"))
+                .await,
+            on_channel("this source is not supported yet")
         );
         assert!(h.is_idle());
     }
@@ -116,8 +117,8 @@ async fn unsupported_source_replies_and_keeps_idle() {
 async fn youtube_without_yt_dlp_replies_and_keeps_idle() {
     let mut h = Harness::new();
     assert_eq!(
-        h.send("!song add --source youtube daft punk").await,
-        reply("yt-dlp could not be started")
+        h.add_outbox("!song add --source youtube daft punk").await,
+        on_channel("yt-dlp could not be started")
     );
     assert!(h.is_idle());
 }

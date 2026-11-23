@@ -1,4 +1,4 @@
-use std::{fs, num::NonZeroUsize};
+use std::{fs, num::NonZeroUsize, os::unix::fs::PermissionsExt};
 
 use tempfile::TempDir;
 use tokio::sync::{mpsc, watch};
@@ -6,7 +6,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::{
     audio::{AudioInput, PlayResult},
-    client::{AudioControl, ClientEvent, ClientRequest},
+    client::{AudioControl, ClientEvent, ClientRequest, ReplyTo},
     commands::Command,
     config::{Config, SourceKind},
     player::{
@@ -31,6 +31,7 @@ impl Launcher for FakeLauncher {
 pub struct Harness {
     pub player: Player,
     pub dir: TempDir,
+    pub scripts: Option<TempDir>,
     control: watch::Receiver<AudioControl>,
     _events: mpsc::Sender<ClientEvent>,
     _requests: mpsc::Receiver<ClientRequest>,
@@ -45,6 +46,27 @@ impl Harness {
         Self::with_config(|config| {
             config.queue.show_page_size = NonZeroUsize::new(page_size).unwrap();
         })
+    }
+
+    pub fn with_yt_dlp(script: &str) -> Self {
+        let scripts = tempfile::tempdir().unwrap();
+        let path = scripts.path().join("yt-dlp");
+        let source = scripts.path().join("yt-dlp.src");
+        fs::write(&source, format!("#!/bin/sh\n{script}\n")).unwrap();
+        let copied = std::process::Command::new("cp")
+            .arg(&source)
+            .arg(&path)
+            .status()
+            .unwrap();
+        assert!(copied.success());
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+
+        let mut harness = Self::with_config(|config| {
+            config.sources.default = SourceKind::Youtube;
+            config.sources.youtube.yt_dlp_path = path;
+        });
+        harness.scripts = Some(scripts);
+        harness
     }
 
     pub fn with_config(edit: impl FnOnce(&mut Config)) -> Self {
@@ -73,6 +95,7 @@ impl Harness {
         Self {
             player,
             dir,
+            scripts: None,
             control: control_rx,
             _events: events_tx,
             _requests: requests_rx,
@@ -80,13 +103,35 @@ impl Harness {
     }
 
     pub async fn send(&mut self, text: &str) -> Option<String> {
+        self.send_from(ReplyTo::Channel, text).await
+    }
+
+    pub async fn send_from(&mut self, reply_to: ReplyTo, text: &str) -> Option<String> {
         let command = Command::parse(text).unwrap().unwrap();
-        self.player.execute(command).await
+        self.player.execute(command, reply_to).await
+    }
+
+    pub async fn next_lookup(&mut self) {
+        let joined = self.player.lookups.join_next_with_id().await.unwrap();
+        self.player.lookup_done(joined);
     }
 
     pub async fn add(&mut self, names: &[&str]) {
         for name in names {
             assert_eq!(self.send(&format!("!song add {name}")).await, None);
+        }
+        self.settle().await;
+    }
+
+    pub async fn add_outbox(&mut self, text: &str) -> Vec<(ReplyTo, String)> {
+        assert_eq!(self.send(text).await, None);
+        self.settle().await;
+        self.outbox()
+    }
+
+    pub async fn settle(&mut self) {
+        while let Some(joined) = self.player.lookups.join_next_with_id().await {
+            self.player.lookup_done(joined);
         }
     }
 
@@ -129,8 +174,8 @@ impl Harness {
         });
     }
 
-    pub fn notices(&mut self) -> Vec<String> {
-        std::mem::take(&mut self.player.notices)
+    pub fn outbox(&mut self) -> Vec<(ReplyTo, String)> {
+        std::mem::take(&mut self.player.outbox)
     }
 
     pub fn control(&self) -> AudioControl {
@@ -148,4 +193,8 @@ impl Harness {
             .map(|(_, track)| track.title.clone())
             .collect()
     }
+}
+
+pub fn on_channel(text: &str) -> Vec<(ReplyTo, String)> {
+    vec![(ReplyTo::Channel, text.to_owned())]
 }

@@ -3,17 +3,19 @@
 
 use std::mem;
 
+use tokio::task::{Id, JoinError};
 use tokio_util::sync::CancellationToken;
 use tracing::warn;
 
 use super::{
     Player,
-    state::{Ended, Playback, PlaybackId, State},
+    state::{Ended, Pending, Playback, PlaybackId, State},
 };
 use crate::{
     audio::{AudioError, AudioInput},
     chat,
-    config::{SourceKind, Volume},
+    client::ReplyTo,
+    config::{SourceKind, SourcesConfig, Volume},
     sources::{
         Location, QueryType, TrackRef, local,
         youtube::{self, YoutubeError},
@@ -21,19 +23,48 @@ use crate::{
 };
 
 impl Player {
-    /// `!song add`. Appends to the queue and starts it when nothing plays.
-    /// A paused track stays paused. `Err` is the message for the chat.
-    pub(super) async fn add(
+    /// `!song add`. Starts the lookup, `lookup_done` queues the track in the order of the commands.
+    pub(super) fn add(&mut self, query: QueryType, source: Option<SourceKind>, reply_to: ReplyTo) {
+        let sources = self.sources.clone();
+        let task = self.lookups.spawn(resolve(sources, query, source)).id();
+        self.pending.push_back(Pending {
+            task,
+            reply_to,
+            result: None,
+        });
+    }
+
+    /// Stores the result of a lookup, then queues every finished lookup at the front of
+    /// `pending`. A track starts when nothing plays, a paused track stays paused.
+    /// Errors go to the place the command came from.
+    pub(super) fn lookup_done(
         &mut self,
-        query: &QueryType,
-        source: Option<SourceKind>,
-    ) -> Result<(), String> {
-        let track = self.resolve(query, source).await?;
-        self.queue.push(track).map_err(|err| err.to_string())?;
-        if let State::Idle = self.state {
-            self.play_next();
+        joined: Result<(Id, Result<TrackRef, String>), JoinError>,
+    ) {
+        let (task, result) = match joined {
+            Ok(done) => done,
+            // Aborted by `!queue clear`, which also removed the entry.
+            Err(err) if err.is_cancelled() => return,
+            Err(err) => {
+                warn!("lookup task panicked: {err}");
+                (err.id(), Err("the lookup failed".to_string()))
+            }
+        };
+        if let Some(entry) = self.pending.iter_mut().find(|entry| entry.task == task) {
+            entry.result = Some(result);
         }
-        Ok(())
+
+        while let Some(entry) = self.pending.pop_front_if(|entry| entry.result.is_some()) {
+            let queued = entry
+                .result
+                .expect("only finished entries are taken")
+                .and_then(|track| self.queue.push(track).map_err(|err| err.to_string()));
+            match queued {
+                Ok(()) if matches!(self.state, State::Idle) => self.play_next(),
+                Ok(()) => {}
+                Err(text) => self.outbox.push((entry.reply_to, text)),
+            }
+        }
     }
 
     /// `!song pause`. Pauses a playing track, otherwise does nothing.
@@ -104,8 +135,10 @@ impl Player {
         if let (Some(playback), Some(reason)) = (self.state.playback(), failure)
             && playback.id == id
         {
-            self.notices
-                .push(could_not_play(&playback.track.title, &reason));
+            self.outbox.push((
+                ReplyTo::Channel,
+                could_not_play(&playback.track.title, &reason),
+            ));
         }
         match &self.state {
             // `stop_current` is not used, the buffered end must play before the next track.
@@ -130,7 +163,8 @@ impl Player {
                 }
                 Err(err) => {
                     warn!("skipping {}: {err}", track.title);
-                    self.notices.push(could_not_play(&track.title, &err));
+                    self.outbox
+                        .push((ReplyTo::Channel, could_not_play(&track.title, &err)));
                 }
             }
         }
@@ -175,49 +209,16 @@ impl Player {
         Ok(())
     }
 
-    /// Turns a query into a track with the chosen source, or the default one from the config.
-    // TODO: move to `sources` once there is a `Source` trait, and off the actor loop
-    //   (`Loading` state), since network sources take seconds.
-    async fn resolve(
-        &self,
-        query: &QueryType,
-        source: Option<SourceKind>,
-    ) -> Result<TrackRef, String> {
-        match source.unwrap_or(self.sources.default) {
-            SourceKind::Tidal | SourceKind::Spotify | SourceKind::Soundcloud => {
-                Err("this source is not supported yet".to_string())
-            }
-            SourceKind::Youtube => youtube::resolve(&self.sources.youtube, query)
-                .await
-                .map_err(|err| err.to_string()),
-            SourceKind::Local => match query {
-                QueryType::Phrase(path) => {
-                    local::resolve(self.music_dir()?, path).map_err(|err| err.to_string())
-                }
-                QueryType::Link(_) => Err("the local source takes a path, not a link".to_string()),
-            },
-        }
-    }
-
     /// Opens a track right before playing it.
     fn open(&self, location: &Location) -> Result<AudioInput, String> {
         match location {
             Location::Local(path) => {
-                local::open(self.music_dir()?, path).map_err(|err| err.to_string())
+                local::open(music_dir(&self.sources)?, path).map_err(|err| err.to_string())
             }
             Location::Youtube(id) => {
                 youtube::open(&self.sources.youtube, id).map_err(|err| err.to_string())
             }
         }
-    }
-
-    /// `None` in the config means the local source is disabled.
-    fn music_dir(&self) -> Result<&std::path::Path, String> {
-        self.sources
-            .local
-            .music_dir
-            .as_deref()
-            .ok_or_else(|| "the local source is disabled".to_string())
     }
 
     /// Takes the next ID.
@@ -226,6 +227,37 @@ impl Player {
         self.next_id += 1;
         id
     }
+}
+
+/// Turns a query into a track with the chosen source, or the default one from the config.
+async fn resolve(
+    sources: SourcesConfig,
+    query: QueryType,
+    source: Option<SourceKind>,
+) -> Result<TrackRef, String> {
+    match source.unwrap_or(sources.default) {
+        SourceKind::Tidal | SourceKind::Spotify | SourceKind::Soundcloud => {
+            Err("this source is not supported yet".to_string())
+        }
+        SourceKind::Youtube => youtube::resolve(&sources.youtube, &query)
+            .await
+            .map_err(|err| err.to_string()),
+        SourceKind::Local => match query {
+            QueryType::Phrase(path) => {
+                local::resolve(music_dir(&sources)?, &path).map_err(|err| err.to_string())
+            }
+            QueryType::Link(_) => Err("the local source takes a path, not a link".to_string()),
+        },
+    }
+}
+
+/// `None` in the config means the local source is disabled.
+fn music_dir(sources: &SourcesConfig) -> Result<&std::path::Path, String> {
+    sources
+        .local
+        .music_dir
+        .as_deref()
+        .ok_or_else(|| "the local source is disabled".to_string())
 }
 
 /// The title comes from outside the bot, so it is escaped.

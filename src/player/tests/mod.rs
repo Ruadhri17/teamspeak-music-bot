@@ -1,5 +1,6 @@
 mod commands;
 mod harness;
-mod notices;
+mod lookups;
+mod outbox;
 mod queue;
 mod song;

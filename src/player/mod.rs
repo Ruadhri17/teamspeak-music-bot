@@ -17,17 +17,21 @@ mod state;
 
 pub use launcher::{AudioLauncher, Launcher};
 
-use std::num::NonZeroUsize;
+use std::{collections::VecDeque, num::NonZeroUsize};
 
-use tokio::sync::{mpsc, watch};
+use tokio::{
+    sync::{mpsc, watch},
+    task::JoinSet,
+};
 
 use crate::{
     client::{AudioControl, ClientEvent, ClientRequest, ReplyTo},
     commands::Command,
     config::{Config, SourcesConfig, Volume},
+    sources::TrackRef,
 };
 use queue::Queue;
-use state::{Ended, State};
+use state::{Ended, Pending, State};
 
 pub struct Player {
     state: State,
@@ -37,6 +41,10 @@ pub struct Player {
     page_size: NonZeroUsize,
     /// The ID for the next playback, only ever goes up.
     next_id: u64,
+    /// Lookups started by `!song add`, matched to `pending` by task ID.
+    lookups: JoinSet<Result<TrackRef, String>>,
+    /// The lookups in the order of the commands, a finished one waits for those before it.
+    pending: VecDeque<Pending>,
     /// Chat messages from the client, the source of commands.
     events: mpsc::Receiver<ClientEvent>,
     /// Error replies to the chat.
@@ -48,9 +56,8 @@ pub struct Player {
     /// Audio threads report here when the track ends.
     done_tx: mpsc::Sender<Ended>,
     done_rx: mpsc::Receiver<Ended>,
-    /// Messages for the channel that are not replies to a command (a track that could
-    /// not be played), sent after the current event is handled.
-    notices: Vec<String>,
+    /// Messages that are not direct replies to a command, sent after the current event is handled.
+    outbox: Vec<(ReplyTo, String)>,
     sources: SourcesConfig,
     /// `!bot volume` above this is refused.
     max_volume: Volume,
@@ -72,13 +79,15 @@ impl Player {
             queue: Queue::new(config.queue.max_len),
             page_size: config.queue.show_page_size,
             next_id: 0,
+            lookups: JoinSet::new(),
+            pending: VecDeque::new(),
             events,
             requests,
             launcher,
             control,
             done_tx,
             done_rx,
-            notices: Vec::new(),
+            outbox: Vec::new(),
             sources: config.sources.clone(),
             max_volume: config.audio.max_volume,
         }
@@ -92,15 +101,16 @@ impl Player {
                     None => break, // client is gone
                 },
                 Some(ended) = self.done_rx.recv() => self.finished(ended),
+                Some(joined) = self.lookups.join_next_with_id() => self.lookup_done(joined),
             }
-            self.send_notices().await;
+            self.send_outbox().await;
         }
     }
 
-    /// Notices go to the bot's channel, where the people listening are.
-    async fn send_notices(&mut self) {
-        for text in std::mem::take(&mut self.notices) {
-            self.reply(ReplyTo::Channel, text).await;
+    /// Sends the outbox, each message to its own recipient.
+    async fn send_outbox(&mut self) {
+        for (to, text) in std::mem::take(&mut self.outbox) {
+            self.reply(to, text).await;
         }
     }
 
@@ -111,7 +121,7 @@ impl Player {
             return;
         };
         let reply = match parsed {
-            Ok(command) => self.execute(command).await,
+            Ok(command) => self.execute(command, reply_to).await,
             Err(err) => Some(err.to_string()),
         };
         if let Some(text) = reply {
@@ -121,9 +131,12 @@ impl Player {
 
     /// Runs a command and returns the chat reply, if any.
     /// Success is silent, except for informational commands.
-    async fn execute(&mut self, command: Command) -> Option<String> {
+    async fn execute(&mut self, command: Command, reply_to: ReplyTo) -> Option<String> {
         match command {
-            Command::Add { query, source, .. } => self.add(&query, source).await.err(),
+            Command::Add { query, source, .. } => {
+                self.add(query, source, reply_to);
+                None
+            }
             Command::Pause => {
                 self.pause();
                 None

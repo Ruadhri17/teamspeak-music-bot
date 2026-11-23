@@ -117,8 +117,11 @@ impl Player {
         }
     }
 
-    /// `!queue clear`. Empties the queue and stops the current track too.
+    /// `!queue clear`. Empties the queue, stops the current track and cancels the lookups
+    /// of `!song add` that have not finished yet.
     pub(super) fn queue_clear(&mut self) {
+        self.lookups.abort_all();
+        self.pending.clear();
         self.queue.clear();
         self.stop_current();
     }
