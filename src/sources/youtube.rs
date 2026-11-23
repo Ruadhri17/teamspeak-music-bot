@@ -396,7 +396,10 @@ struct Stream {
 }
 
 impl Stream {
-    /// WebM is preferred, it plays from a pipe, M4A may need to seek.
+    /// WebM is preferred, it plays from a pipe, M4A may need to seek. Some videos have no
+    /// audio-only format for a client (seen with `visionos` on videos for kids), then a
+    /// format with video up to 360p, the decoder skips the video. Its AAC is close to
+    /// the audio-only formats, a higher resolution would only cost bandwidth.
     fn spawn(&self, clients: Clients) -> io::Result<Running> {
         let mut child = yt_dlp_command(&self.config, clients)
             .args([
@@ -404,7 +407,7 @@ impl Stream {
                 "--quiet",
                 "--no-progress",
                 "--format",
-                "bestaudio[ext=webm]/bestaudio",
+                "bestaudio[ext=webm]/bestaudio/best[height<=360]",
                 "--output",
                 "-",
             ])

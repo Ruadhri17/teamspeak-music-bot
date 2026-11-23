@@ -52,8 +52,9 @@ impl Decoder {
                 Some(stream)
             }
         };
+        // `-vn`: a source with video (YouTube's fallback format) has it skipped, not decoded.
         let mut child = command
-            .args(["-f", "f32le", "-ac", "2", "-ar", "48000", "pipe:1"])
+            .args(["-vn", "-f", "f32le", "-ac", "2", "-ar", "48000", "pipe:1"])
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()?;
