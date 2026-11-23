@@ -121,7 +121,7 @@ impl Player {
             return;
         };
         let reply = match parsed {
-            Ok(command) => self.execute(command, reply_to).await,
+            Ok(command) => self.execute(command, reply_to),
             Err(err) => Some(err.to_string()),
         };
         if let Some(text) = reply {
@@ -131,7 +131,7 @@ impl Player {
 
     /// Runs a command and returns the chat reply, if any.
     /// Success is silent, except for informational commands.
-    async fn execute(&mut self, command: Command, reply_to: ReplyTo) -> Option<String> {
+    fn execute(&mut self, command: Command, reply_to: ReplyTo) -> Option<String> {
         match command {
             Command::Add { query, source, .. } => {
                 self.add(query, source, reply_to);

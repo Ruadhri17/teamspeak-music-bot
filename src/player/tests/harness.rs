@@ -102,13 +102,13 @@ impl Harness {
         }
     }
 
-    pub async fn send(&mut self, text: &str) -> Option<String> {
-        self.send_from(ReplyTo::Channel, text).await
+    pub fn send(&mut self, text: &str) -> Option<String> {
+        self.send_from(ReplyTo::Channel, text)
     }
 
-    pub async fn send_from(&mut self, reply_to: ReplyTo, text: &str) -> Option<String> {
+    pub fn send_from(&mut self, reply_to: ReplyTo, text: &str) -> Option<String> {
         let command = Command::parse(text).unwrap().unwrap();
-        self.player.execute(command, reply_to).await
+        self.player.execute(command, reply_to)
     }
 
     pub async fn next_lookup(&mut self) {
@@ -118,13 +118,13 @@ impl Harness {
 
     pub async fn add(&mut self, names: &[&str]) {
         for name in names {
-            assert_eq!(self.send(&format!("!song add {name}")).await, None);
+            assert_eq!(self.send(&format!("!song add {name}")), None);
         }
         self.settle().await;
     }
 
     pub async fn add_outbox(&mut self, text: &str) -> Vec<(ReplyTo, String)> {
-        assert_eq!(self.send(text).await, None);
+        assert_eq!(self.send(text), None);
         self.settle().await;
         self.outbox()
     }

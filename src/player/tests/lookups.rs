@@ -53,8 +53,8 @@ fn is_running(pid: &str) -> bool {
 async fn commands_answer_while_a_lookup_runs() {
     let mut h = harness();
     let start = Instant::now();
-    assert_eq!(h.send("!song add slow").await, None);
-    assert!(h.send("!queue show").await.is_some());
+    assert_eq!(h.send("!song add slow"), None);
+    assert!(h.send("!queue show").is_some());
     assert!(start.elapsed() < Duration::from_millis(500));
     assert!(h.is_idle());
 
@@ -66,13 +66,10 @@ async fn commands_answer_while_a_lookup_runs() {
 async fn track_end_during_a_lookup_starts_the_next_track() {
     let mut h = harness();
     for name in ["a.mp3", "b.mp3"] {
-        assert_eq!(
-            h.send(&format!("!song add --source local {name}")).await,
-            None
-        );
+        assert_eq!(h.send(&format!("!song add --source local {name}")), None);
     }
     h.settle().await;
-    assert_eq!(h.send("!song add slow").await, None);
+    assert_eq!(h.send("!song add slow"), None);
 
     h.finish_current();
     assert_eq!(h.playing(), Some("b"));
@@ -85,8 +82,8 @@ async fn track_end_during_a_lookup_starts_the_next_track() {
 #[tokio::test]
 async fn tracks_keep_the_order_of_the_commands() {
     let mut h = harness();
-    assert_eq!(h.send("!song add slow one").await, None);
-    assert_eq!(h.send("!song add fast").await, None);
+    assert_eq!(h.send("!song add slow one"), None);
+    assert_eq!(h.send("!song add fast"), None);
 
     h.next_lookup().await;
     assert!(h.is_idle());
@@ -100,8 +97,8 @@ async fn tracks_keep_the_order_of_the_commands() {
 #[tokio::test]
 async fn failed_lookup_does_not_hold_back_the_next_one() {
     let mut h = harness();
-    assert_eq!(h.send("!song add fail").await, None);
-    assert_eq!(h.send("!song add fast").await, None);
+    assert_eq!(h.send("!song add fail"), None);
+    assert_eq!(h.send("!song add fast"), None);
     h.settle().await;
 
     assert_eq!(h.playing(), Some("fast"));
@@ -114,7 +111,7 @@ async fn failed_lookup_does_not_hold_back_the_next_one() {
 async fn lookup_error_goes_to_the_sender() {
     let mut h = harness();
     let sender = ReplyTo::Client(7);
-    assert_eq!(h.send_from(sender, "!song add fail").await, None);
+    assert_eq!(h.send_from(sender, "!song add fail"), None);
     h.settle().await;
 
     let outbox = h.outbox();
@@ -126,12 +123,12 @@ async fn lookup_error_goes_to_the_sender() {
 #[tokio::test]
 async fn queue_clear_cancels_lookups_and_kills_yt_dlp() {
     let mut h = harness();
-    assert_eq!(h.send("!song add hang").await, None);
+    assert_eq!(h.send("!song add hang"), None);
     let pid_file = h.scripts.as_ref().unwrap().path().join("hang.pid");
     let pid = wait_for(&pid_file).await;
     assert!(is_running(&pid));
 
-    assert_eq!(h.send("!queue clear").await, None);
+    assert_eq!(h.send("!queue clear"), None);
     tokio::time::timeout(Duration::from_secs(2), h.settle())
         .await
         .expect("the lookup was not cancelled");

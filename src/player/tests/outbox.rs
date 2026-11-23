@@ -32,7 +32,7 @@ async fn failure_of_an_old_track_sends_nothing() {
     let mut h = Harness::new();
     h.add(&["a.mp3", "b.mp3"]).await;
     let old = h.current_id();
-    assert_eq!(h.send("!song next").await, None);
+    assert_eq!(h.send("!song next"), None);
     h.player.finished(Ended {
         id: old,
         failure: Some("playback failed".to_owned()),
@@ -45,7 +45,7 @@ async fn failure_of_an_old_track_sends_nothing() {
 async fn failure_while_paused_is_reported() {
     let mut h = Harness::new();
     h.add(&["a.mp3"]).await;
-    assert_eq!(h.send("!song pause").await, None);
+    assert_eq!(h.send("!song pause"), None);
     h.fail_current("playback failed");
     assert_eq!(h.outbox(), on_channel("could not play a: playback failed"));
 }
