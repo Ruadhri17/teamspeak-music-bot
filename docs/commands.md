@@ -38,7 +38,7 @@ Commands are grouped into three families:
 
 Who counts as an admin is set in the bot configuration by **server group** (by name or ID), by default the `Admin` and `Owner` groups. Members of chosen server groups can be **excluded**: they cannot control or summon the bot. Who may drag the bot to another channel is decided by the server permissions, not by the bot. Ask your server admin if you are unsure of your role.
 
-Commands from other channels are rejected with a short message.
+Commands from other channels are rejected with a short message. `!help`, `!bot ping` and `!bot summon` work from anywhere.
 
 ## Command overview
 

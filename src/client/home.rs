@@ -38,17 +38,17 @@ fn find_path(path: &str, channels: &[ChannelInfo]) -> Option<u64> {
 pub enum Summon {
     /// The sender is already in the bot's channel.
     Stay,
-    /// The bot is at home and goes to the sender's channel.
+    /// The bot goes to the sender's channel: it is at home, or an admin called it.
     Move(u64),
     /// The bot is in someone else's channel.
     Busy,
 }
 
-// TODO: admins summon the bot even while it is busy.
-pub fn summon(bot: u64, home: u64, sender: u64) -> Summon {
+/// An admin takes the bot from any channel, others only from its home.
+pub fn summon(bot: u64, home: u64, sender: u64, admin: bool) -> Summon {
     if sender == bot {
         Summon::Stay
-    } else if bot == home {
+    } else if admin || bot == home {
         Summon::Move(sender)
     } else {
         Summon::Busy

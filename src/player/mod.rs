@@ -23,11 +23,13 @@ use tokio::{
     sync::{mpsc, watch},
     task::JoinSet,
 };
+use tracing::debug;
 
 use crate::{
-    client::{AudioControl, ClientEvent, ClientRequest, ReplyTo},
+    client::{AudioControl, ClientEvent, ClientRequest, ReplyTo, Sender},
     commands::Command,
     config::{Config, SourcesConfig, Volume},
+    permissions::{self, Role},
     sources::Found,
 };
 use queue::Queue;
@@ -123,26 +125,31 @@ impl Player {
     async fn handle_event(&mut self, event: ClientEvent) {
         let ClientEvent::Message {
             reply_to,
-            sender_id,
+            sender,
             text,
-            ..
         } = event;
-
-        let Some(parsed) = Command::parse(&text) else {
-            return;
-        };
-        let reply = match parsed {
-            Ok(command) => self.execute(command, reply_to, sender_id),
-            Err(err) => Some(err.to_string()),
-        };
-        if let Some(text) = reply {
+        if let Some(text) = self.command(&text, reply_to, &sender) {
             self.reply(reply_to, text).await;
         }
     }
 
+    /// Parses a chat message, checks the sender's permissions and runs the command.
+    /// Returns the chat reply, `None` for text that is not a command.
+    fn command(&mut self, text: &str, reply_to: ReplyTo, sender: &Sender) -> Option<String> {
+        let command = match Command::parse(text)? {
+            Ok(command) => command,
+            Err(err) => return Some(err.to_string()),
+        };
+        if let Err(denied) = permissions::check(&command, sender.role, sender.in_bot_channel) {
+            debug!("command from {} refused: {denied}", sender.name);
+            return Some(denied.to_string());
+        }
+        self.execute(command, reply_to, sender)
+    }
+
     /// Runs a command and returns the chat reply, if any.
     /// Success is silent, except for informational commands.
-    fn execute(&mut self, command: Command, reply_to: ReplyTo, sender_id: u16) -> Option<String> {
+    fn execute(&mut self, command: Command, reply_to: ReplyTo, sender: &Sender) -> Option<String> {
         match command {
             Command::Add { query, source, .. } => {
                 self.add(query, source, reply_to);
@@ -171,8 +178,9 @@ impl Player {
             // The client knows the channels, it decides and answers.
             Command::Summon => {
                 self.outbox.push(ClientRequest::Summon {
-                    sender_id,
+                    sender_id: sender.id,
                     reply_to,
+                    admin: sender.role == Role::Admin,
                 });
                 None
             }

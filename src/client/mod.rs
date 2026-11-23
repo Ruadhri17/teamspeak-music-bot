@@ -16,7 +16,7 @@ mod request;
 mod tests;
 
 pub use error::{ClientError, ClientResult};
-pub use event::{ClientEvent, ReplyTo};
+pub use event::{ClientEvent, ReplyTo, Sender};
 pub use request::ClientRequest;
 
 use std::{collections::HashMap, path::PathBuf};
@@ -30,7 +30,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 use tsclientlib::{
     ChannelId, CommandError, Connection, DisconnectOptions, InMessage, Invoker, MessageHandle,
-    OutCommandExt, Reason, StreamItem,
+    OutCommandExt, Reason, StreamItem, data,
     events::{Event, PropertyId},
     prelude::M2BClientEditExt,
 };
@@ -40,7 +40,8 @@ use home::ChannelInfo;
 
 use crate::{
     audio::{FRAME_DURATION, Frame, Output},
-    config::{ChannelRef, Config, Volume},
+    config::{ChannelRef, Config, GroupRef, PermissionsConfig, Volume},
+    permissions::{self, Group},
     secrets::{TeamspeakSecrets, identity},
 };
 
@@ -86,6 +87,9 @@ pub struct Client {
     /// Known once connected, forgotten on a reconnect.
     home: Option<ChannelId>,
     description: String,
+    permissions: PermissionsConfig,
+    /// The warning about group names that cannot work was logged.
+    warned_group_names: bool,
     /// Why the server removed the bot, e.g. `kicked by Admin`, for the error when the
     /// connection ends.
     left: Option<String>,
@@ -120,6 +124,8 @@ impl Client {
             home_config: config.teamspeak.home_channel.clone(),
             home: None,
             description: config.teamspeak.description.clone(),
+            permissions: config.permissions.clone(),
+            warned_group_names: false,
             sent: HashMap::new(),
             left: None,
             shutdown,
@@ -300,11 +306,22 @@ impl Client {
             }
         }
 
-        for event in events {
-            if let Some(event) = event::translate(&event, bot_id) {
-                // `Err` means the receiver is gone, which only happens during shutdown.
-                let _ = self.events.send(event).await;
-            }
+        // Collected first, so the state is not borrowed while sending waits.
+        let translated: Vec<ClientEvent> = events
+            .iter()
+            .filter_map(|event| {
+                event::translate(event, bot_id, |invoker| {
+                    sender(state, &self.permissions, invoker)
+                })
+            })
+            .collect();
+        if !translated.is_empty() && !self.warned_group_names {
+            self.warned_group_names = true;
+            warn_unseen_group_names(state, &self.permissions);
+        }
+        for event in translated {
+            // `Err` means the receiver is gone, which only happens during shutdown.
+            let _ = self.events.send(event).await;
         }
     }
 
@@ -387,6 +404,65 @@ impl Client {
             .for_each(|_| future::ready(()))
             .await;
         Ok(())
+    }
+}
+
+/// The role and channel of a message's author, from what the bot sees right now.
+/// A sender the bot cannot see gets no groups and counts as outside its channel.
+fn sender(state: &data::Connection, config: &PermissionsConfig, invoker: &Invoker) -> Sender {
+    let client = state.clients.get(&invoker.id);
+    let bot_channel = state.clients.get(&state.own_client).map(|bot| bot.channel);
+    let groups: Vec<Group> = client
+        .map(|client| {
+            client
+                .server_groups
+                .iter()
+                .map(|id| Group {
+                    id: id.0,
+                    name: state.server_groups.get(id).map(|group| group.name.as_str()),
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    Sender {
+        id: invoker.id.0,
+        name: invoker.name.clone(),
+        role: permissions::role(config, &groups),
+        in_bot_channel: client.is_some_and(|client| Some(client.channel) == bot_channel),
+    }
+}
+
+/// Group names in `[permissions]` match only groups the bot can see. Checked at the first
+/// message, the server sends its group list after the channel list.
+fn warn_unseen_group_names(state: &data::Connection, config: &PermissionsConfig) {
+    let unseen: Vec<&str> = config
+        .admin_groups
+        .iter()
+        .chain(&config.blocked_groups)
+        .filter_map(|group| match group {
+            GroupRef::Name(name) => Some(name.as_str()),
+            GroupRef::Id(_) => None,
+        })
+        .filter(|name| {
+            !state
+                .server_groups
+                .values()
+                .any(|group| permissions::same_name(&group.name, name))
+        })
+        .collect();
+    if unseen.is_empty() {
+        return;
+    }
+    if state.server_groups.is_empty() {
+        warn!(
+            "the bot cannot see the server groups, only group IDs in [permissions] work \
+             (needs b_virtualserver_servergroup_list)"
+        );
+    } else {
+        warn!(
+            "[permissions] names server groups that do not exist: {}",
+            unseen.join(", ")
+        );
     }
 }
 

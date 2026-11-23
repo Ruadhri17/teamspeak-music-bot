@@ -14,10 +14,11 @@ pub enum ClientRequest {
         to: ReplyTo,
         text: String,
     },
-    /// `!bot summon`: move to the sender's channel if the bot is at home.
+    /// `!bot summon`: move to the sender's channel if the bot is at home, or always for an admin.
     Summon {
         sender_id: u16,
         reply_to: ReplyTo,
+        admin: bool,
     },
     // TODO: `SetNickname(text)` and `SetDescription(text)` for `!bot config set`.
 }
@@ -39,7 +40,8 @@ pub fn execute(
         ClientRequest::Summon {
             sender_id,
             reply_to,
-        } => summon(connection, home, sender_id, reply_to),
+            admin,
+        } => summon(connection, home, sender_id, reply_to, admin),
     }
 }
 
@@ -56,6 +58,7 @@ fn summon(
     home: Option<ChannelId>,
     sender_id: u16,
     reply_to: ReplyTo,
+    admin: bool,
 ) -> ClientResult<Option<Sent>> {
     let Some(home) = home else {
         warn!("!bot summon before the home channel is known, ignored");
@@ -72,9 +75,9 @@ fn summon(
         return Ok(None);
     };
 
-    let decision = home::summon(bot.channel.0, home.0, sender.channel.0);
+    let decision = home::summon(bot.channel.0, home.0, sender.channel.0, admin);
     debug!(
-        "!bot summon: bot in {}, home {}, sender in {}: {decision:?}",
+        "!bot summon: bot in {}, home {}, sender in {}, admin {admin}: {decision:?}",
         bot.channel.0, home.0, sender.channel.0
     );
     match decision {

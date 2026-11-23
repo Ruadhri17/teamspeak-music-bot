@@ -6,9 +6,9 @@ use tokio_util::sync::CancellationToken;
 
 use crate::{
     audio::{AudioInput, PlayResult},
-    client::{AudioControl, ClientEvent, ClientRequest, ReplyTo},
-    commands::Command,
+    client::{AudioControl, ClientEvent, ClientRequest, ReplyTo, Sender},
     config::{Config, SourceKind},
+    permissions::Role,
     player::{
         Launcher, Player,
         state::{Ended, PlaybackId, State},
@@ -112,12 +112,15 @@ impl Harness {
     }
 
     pub fn send_from(&mut self, reply_to: ReplyTo, text: &str) -> Option<String> {
-        let sender_id = match reply_to {
+        let id = match reply_to {
             ReplyTo::Client(id) => id,
             ReplyTo::Channel => 1,
         };
-        let command = Command::parse(text).unwrap().unwrap();
-        self.player.execute(command, reply_to, sender_id)
+        self.send_as(reply_to, &user(id), text)
+    }
+
+    pub fn send_as(&mut self, reply_to: ReplyTo, sender: &Sender, text: &str) -> Option<String> {
+        self.player.command(text, reply_to, sender)
     }
 
     pub async fn next_lookup(&mut self) {
@@ -216,4 +219,17 @@ impl Harness {
 
 pub fn on_channel(text: &str) -> Vec<(ReplyTo, String)> {
     vec![(ReplyTo::Channel, text.to_owned())]
+}
+
+pub fn sender(id: u16, role: Role, in_bot_channel: bool) -> Sender {
+    Sender {
+        id,
+        name: format!("user{id}"),
+        role,
+        in_bot_channel,
+    }
+}
+
+pub fn user(id: u16) -> Sender {
+    sender(id, Role::User, true)
 }

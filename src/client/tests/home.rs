@@ -63,17 +63,17 @@ fn home_channel_by_path_must_match_exactly() {
 
 #[test]
 fn summon_in_the_same_channel_does_nothing() {
-    assert_eq!(summon(2, 1, 2), Summon::Stay);
-    assert_eq!(summon(1, 1, 1), Summon::Stay);
+    assert_eq!(summon(2, 1, 2, false), Summon::Stay);
+    assert_eq!(summon(1, 1, 1, false), Summon::Stay);
 }
 
 #[test]
 fn summon_moves_the_bot_from_home() {
-    assert_eq!(summon(1, 1, 3), Summon::Move(3));
+    assert_eq!(summon(1, 1, 3, false), Summon::Move(3));
 }
 
 #[test]
 fn summon_is_refused_while_the_bot_is_elsewhere() {
-    assert_eq!(summon(2, 1, 3), Summon::Busy);
-    assert_eq!(summon(2, 1, 1), Summon::Busy);
+    assert_eq!(summon(2, 1, 3, false), Summon::Busy);
+    assert_eq!(summon(2, 1, 1, false), Summon::Busy);
 }
