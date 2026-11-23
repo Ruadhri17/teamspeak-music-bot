@@ -10,6 +10,13 @@ Commands are grouped into three families:
 - `!queue`: the queue
 - `!bot`: the bot itself
 
+## Getting help
+
+- `!help` lists the three families.
+- `!song help`, `!queue help` and `!bot help` list the commands of one family, with a short description of each. A bare `!song`, `!queue` or `!bot`, or `--help` instead of `help`, gives the same list.
+- `!song add --help` explains the options of `!song add`, and `!bot config help` the settings commands.
+- A command with a typo in its first word, such as `!sond add`, gets the answer `unknown command, did you mean !song?`. Commands that are not close to any of the bot's commands are ignored, so the bot does not answer commands meant for another bot in the channel.
+
 ## Getting the bot into your channel
 
 - When idle, the bot waits in its **home channel**.
@@ -45,15 +52,18 @@ Commands from other channels are rejected with a short message.
 | `!song stop` / `!song pause` | Pauses the current song; the queue is kept |
 | `!song resume` | Resumes the paused song, or starts the next one in the queue |
 | `!song next` / `!song skip` | Skips to the next song in the queue |
+| `!song current` | Shows the song that is playing now |
 | `!queue show` / `!queue display` | Shows the current song and the numbered queue |
 | `!queue remove <number>` | Removes the song with that number from the queue |
 | `!queue clear` | Stops the current song and empties the whole queue |
 | `!bot summon` | *(private message)* Brings the bot from its home channel to yours |
 | `!bot volume [0-100]` | Shows the volume, or sets it for all songs |
+| `!bot ping` | Checks that the bot answers |
 | `!bot config list [section]` | *(admins only, private message)* Lists the bot settings |
 | `!bot config get <key>` | *(admins only, private message)* Shows one setting |
 | `!bot config set <key> <value>` | *(admins only, private message)* Changes a bot setting |
 | `!bot config reload` | *(admins only, private message)* Reloads settings after editing `config.toml` by hand |
+| `!help` | Lists the command families, see [Getting help](#getting-help) |
 
 ## `!song` - playback
 
@@ -111,6 +121,10 @@ Continues the paused song from where it stopped. If no song is paused, it starts
 
 Both commands do the same thing: they skip the current song, including one that is still loading, and play the next one. If the queue is empty, playback stops and the bot tells you so.
 
+### `!song current`
+
+Replies with the title of the song that is playing now, with `(paused)` after it when it is paused, or `nothing is playing`.
+
 ## `!queue` - the queue
 
 ### `!queue show` / `!queue display`
@@ -139,6 +153,10 @@ Without a number, the bot replies with the current volume. With a number, it set
 
 The scale is logarithmic, like most volume controls: 50 is clearly quieter than 100, and below about 20 it gets very quiet. The bot administrator may set a highest allowed volume. The volume goes back to the default when the bot restarts.
 
+### `!bot ping`
+
+The bot replies `pong`. Use it to check that the bot is connected and reads the chat.
+
 ### `!bot config` (admins only)
 
 The bot accepts these commands only from admins, and only in a private message, so that settings are not shown to the whole channel.
@@ -162,6 +180,4 @@ The bot accepts these commands only from admins, and only in a private message, 
 
 These commands are not designed in detail yet:
 
-- `!song now`: show the current song
 - `!song search <phrase>` and `!song pick <n>`: choose a search result from a list
-- `!help`: list commands
