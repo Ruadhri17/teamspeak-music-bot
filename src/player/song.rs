@@ -120,10 +120,11 @@ impl Player {
         if let Some(playback) = self.state.playback() {
             playback.stop.cancel();
         }
-        // IDs only go up, so `next_id` is above every stream started so far.
-        let drop_before = self.next_id;
+        // IDs only go up, so `next_id` is above every stream started so far: the client
+        // drops their buffered frames and plays only the streams started from now on.
+        let min_stream_id = self.next_id;
         self.control.send_modify(|control| {
-            control.drop_before = drop_before;
+            control.min_stream_id = min_stream_id;
             control.paused = false;
         });
         self.state = State::Idle;

@@ -36,8 +36,9 @@ use crate::{
 /// What the client sends right now. Set by the player, read every tick.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AudioControl {
-    /// Frames of streams below this are dropped.
-    pub drop_before: u64,
+    /// The lowest stream ID that still plays. Frames with a lower ID belong to stopped
+    /// tracks and are dropped instead of sent.
+    pub min_stream_id: u64,
     /// While `true`, no frames are sent and they wait in the channel.
     pub paused: bool,
     /// Applied right before encoding, so a change is heard in the next frame.
@@ -47,7 +48,7 @@ pub struct AudioControl {
 impl Default for AudioControl {
     fn default() -> Self {
         Self {
-            drop_before: 0,
+            min_stream_id: 0,
             paused: false,
             volume: Volume::FULL,
         }
@@ -174,7 +175,8 @@ impl Client {
 
         loop {
             match self.frames.try_recv() {
-                Ok(frame) if frame.stream < control.drop_before => continue,
+                // A stopped track, its frames left in the channel are dropped.
+                Ok(frame) if frame.stream < control.min_stream_id => continue,
                 Ok(mut frame) => {
                     match self.output.encode(&mut frame.pcm, control.volume) {
                         Ok(data) => {

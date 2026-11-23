@@ -83,7 +83,7 @@ async fn queue_clear_stops_everything() {
     assert!(h.is_idle());
     assert!(h.queued().is_empty());
     assert!(stop.is_cancelled());
-    assert!(h.control().drop_before > id.0);
+    assert!(h.control().min_stream_id > id.0);
 }
 
 #[tokio::test]
