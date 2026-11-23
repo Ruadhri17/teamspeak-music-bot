@@ -49,8 +49,11 @@ async fn check(config: &Config, query: &str, full: bool) -> anyhow::Result<()> {
     }
 
     let youtube = &config.sources.youtube;
+    let paths = paths(youtube);
+    let preferred = paths[0].0.clone();
+    let has_fallback = paths.len() > 1;
     let mut working = Vec::new();
-    for (label, clients) in paths(youtube) {
+    for (label, clients) in paths {
         println!("\nclients {label}");
         match check_path(config, &query, clients, full).await {
             Ok(()) => working.push(label),
@@ -63,6 +66,10 @@ async fn check(config: &Config, query: &str, full: bool) -> anyhow::Result<()> {
         None => anyhow::bail!("no path played this video, see the errors above"),
         Some(first) if working.len() > 1 => {
             println!("OK: both paths work, the bot uses {first} first")
+        }
+        Some(only) if !has_fallback => println!("OK with {only}"),
+        Some(only) if *only == preferred => {
+            println!("OK only with {only}, the bot tries it first, the fallback fails")
         }
         Some(only) => println!("OK only with {only}, the bot falls back to it after a failure"),
     }
