@@ -9,6 +9,10 @@ pub enum ClientError {
     #[error("connection to the TeamSpeak server failed")]
     Connection(#[source] Box<tsclientlib::Error>),
 
+    /// Kicked, banned, or the connection ended in another way tsclientlib does not retry.
+    #[error("the TeamSpeak server closed the connection ({0})")]
+    Closed(String),
+
     #[error("cannot send a request to the TeamSpeak server")]
     Request(#[source] Box<tsclientlib::Error>),
 

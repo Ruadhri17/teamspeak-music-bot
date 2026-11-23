@@ -27,10 +27,12 @@ use tokio::{
     time::MissedTickBehavior,
 };
 use tokio_util::sync::CancellationToken;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 use tsclientlib::{
-    ChannelId, CommandError, Connection, DisconnectOptions, InMessage, MessageHandle,
-    OutCommandExt, StreamItem, prelude::M2BClientEditExt,
+    ChannelId, CommandError, Connection, DisconnectOptions, InMessage, Invoker, MessageHandle,
+    OutCommandExt, Reason, StreamItem,
+    events::{Event, PropertyId},
+    prelude::M2BClientEditExt,
 };
 use tsproto_packets::packets::{AudioData, CodecType, OutAudio};
 
@@ -84,6 +86,9 @@ pub struct Client {
     /// Known once connected, forgotten on a reconnect.
     home: Option<ChannelId>,
     description: String,
+    /// Why the server removed the bot, e.g. `kicked by Admin`, for the error when the
+    /// connection ends.
+    left: Option<String>,
     /// Commands waiting for the server's answer, with a label for the log.
     sent: HashMap<MessageHandle, &'static str>,
     shutdown: CancellationToken,
@@ -116,6 +121,7 @@ impl Client {
             home: None,
             description: config.teamspeak.description.clone(),
             sent: HashMap::new(),
+            left: None,
             shutdown,
         })
     }
@@ -133,8 +139,10 @@ impl Client {
                 item = async { self.connection.events().next().await } => match item {
                     Some(Ok(item)) => self.handle_item(item).await,
                     Some(Err(source)) => return Err(ClientError::Connection(source.into())),
-                    // TODO: decide what a connection closed by the server means (error, reconnect).
-                    None => return Ok(()),
+                    // Only `shutdown` ends the bot normally, an error lets systemd restart it.
+                    None => return Err(ClientError::Closed(self.left.take().unwrap_or_else(
+                        || "no reason given".to_owned(),
+                    ))),
                 },
                 // Only logged, a broken connection is reported by the `events()` branch.
                 Some(request) = self.requests.recv() => {
@@ -272,11 +280,25 @@ impl Client {
 
     async fn forward_events(&mut self, events: Vec<tsclientlib::events::Event>) {
         let Ok(state) = self.connection.get_state() else {
-            // Book events arrive only after connecting, so this branch is not expected.
-            warn!("received events before the connection state exists, skipped");
+            // Happens when the server shuts down: tsclientlib drops the old state and then
+            // hands over the last events of that connection.
+            debug!("received events without a connection state, skipped");
             return;
         };
         let bot_id = state.own_client;
+
+        for event in &events {
+            if let Event::PropertyRemoved {
+                id: PropertyId::Client(id),
+                invoker,
+                extra,
+                ..
+            } = event
+                && *id == bot_id
+            {
+                self.left = Some(leave_reason(extra.reason, invoker.as_ref()));
+            }
+        }
 
         for event in events {
             if let Some(event) = event::translate(&event, bot_id) {
@@ -299,7 +321,9 @@ impl Client {
     /// Sends one frame, called every `FRAME_DURATION`.
     fn send_frame(&mut self) {
         let control = *self.control.borrow();
-        if control.paused {
+        // While tsclientlib reconnects, frames wait in the channel like during a pause,
+        // `send_audio` would fail for every one of them.
+        if control.paused || self.home.is_none() {
             self.end_speech();
             return;
         }
@@ -363,5 +387,19 @@ impl Client {
             .for_each(|_| future::ready(()))
             .await;
         Ok(())
+    }
+}
+
+/// `kicked by Admin`, `banned by Admin`, or the reason as tsclientlib names it.
+fn leave_reason(reason: Option<Reason>, invoker: Option<&Invoker>) -> String {
+    let what = match reason {
+        Some(Reason::KickServer) => "kicked".to_owned(),
+        Some(Reason::KickServerBan) => "banned".to_owned(),
+        Some(other) => format!("{other:?}"),
+        None => "removed".to_owned(),
+    };
+    match invoker {
+        Some(invoker) => format!("{what} by {}", invoker.name),
+        None => what,
     }
 }
