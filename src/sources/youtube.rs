@@ -2,6 +2,7 @@
 
 use std::{
     io::{self, Read},
+    num::NonZeroUsize,
     process::{Child, ChildStdout, ExitStatus, Stdio},
     str::FromStr,
     thread::{self, JoinHandle},
@@ -16,25 +17,26 @@ use url::Url;
 use crate::{
     audio::{AudioInput, read_tail},
     config::YoutubeConfig,
-    sources::{Location, QueryType, TrackRef},
+    sources::{Found, Location, Playlist, QueryType, TrackRef},
 };
 
-const YT_URL: &str = "https://www.youtube.com/watch?v=";
+const YT_VIDEO_URL: &str = "https://www.youtube.com/watch?v=";
+const YT_PLAYLIST_URL: &str = "https://www.youtube.com/playlist?list=";
 const LOOKUP_TIMEOUT: Duration = Duration::from_secs(20);
 /// The first with the preferred clients, the rest with the `yt-dlp` defaults.
 const OPEN_ATTEMPTS: u32 = 3;
 
 /// Never contains the rejected text, the message may go to the chat.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-#[error("invalid YouTube video id")]
-pub struct InvalidVideoId;
+#[error("invalid YouTube id")]
+pub struct InvalidId;
 
 /// Always 11 characters of `[A-Za-z0-9_-]`, checked when created.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VideoId(String);
 
 impl FromStr for VideoId {
-    type Err = InvalidVideoId;
+    type Err = InvalidId;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let valid = s.len() == 11
@@ -43,14 +45,39 @@ impl FromStr for VideoId {
         if valid {
             Ok(Self(s.to_owned()))
         } else {
-            Err(InvalidVideoId)
+            Err(InvalidId)
         }
     }
 }
 
 impl VideoId {
     pub fn url(&self) -> String {
-        format!("{YT_URL}{}", self.0)
+        format!("{YT_VIDEO_URL}{}", self.0)
+    }
+}
+
+/// 2 to 64 characters of [A-Za-z0-9_-], checked when created.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlaylistId(String);
+
+impl FromStr for PlaylistId {
+    type Err = InvalidId;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let valid = (2..=64).contains(&s.len())
+            && s.bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_');
+        if valid {
+            Ok(Self(s.to_owned()))
+        } else {
+            Err(InvalidId)
+        }
+    }
+}
+
+impl PlaylistId {
+    pub fn url(&self) -> String {
+        format!("{YT_PLAYLIST_URL}{}", self.0)
     }
 }
 
@@ -58,7 +85,7 @@ impl VideoId {
 #[derive(Debug, PartialEq, Eq)]
 pub enum YoutubeLink {
     Video(VideoId),
-    // TODO: Playlist(PlaylistId) in stage 5.
+    Playlist(PlaylistId),
 }
 
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
@@ -67,10 +94,12 @@ pub enum LinkError {
     NotYoutube,
     #[error("this YouTube link does not point to a video")]
     NoVideo,
-    #[error("YouTube playlists are not supported yet")]
-    PlaylistNotSupported,
+    #[error("this YouTube link does not point to a playlist")]
+    NoPlaylist,
+    #[error("YouTube mixes are not supported, add a single video or a playlist")]
+    MixNotSupported,
     #[error(transparent)]
-    InvalidId(#[from] InvalidVideoId),
+    InvalidId(#[from] InvalidId),
 }
 
 /// Hosts that `sources/mod.rs` sends here. Compared exactly, a lookalike host never passes.
@@ -103,7 +132,17 @@ pub fn parse_link(url: &Url) -> Result<YoutubeLink, LinkError> {
             .map(|(_, value)| value.into_owned())
             .ok_or(LinkError::NoVideo)?,
         (_, Some("shorts" | "embed" | "live"), Some(id)) => id.to_owned(),
-        (_, Some("playlist"), _) => return Err(LinkError::PlaylistNotSupported),
+        (_, Some("playlist"), _) => {
+            let id = url
+                .query_pairs()
+                .find(|(key, _)| key == "list")
+                .map(|(_, value)| value.into_owned())
+                .ok_or(LinkError::NoPlaylist)?;
+            if id.starts_with("RD") {
+                return Err(LinkError::MixNotSupported);
+            }
+            return Ok(YoutubeLink::Playlist(id.parse()?));
+        }
         _ => return Err(LinkError::NoVideo),
     };
     Ok(YoutubeLink::Video(id.parse()?))
@@ -116,7 +155,7 @@ pub enum YoutubeError {
     #[error(transparent)]
     Link(#[from] LinkError),
     #[error(transparent)]
-    InvalidId(#[from] InvalidVideoId),
+    InvalidId(#[from] InvalidId),
     #[error("yt-dlp could not be started")]
     Spawn(#[source] std::io::Error),
     #[error("YouTube did not answer in time")]
@@ -132,12 +171,17 @@ pub enum YoutubeError {
     AgeRestricted,
 }
 
-/// Finds the track, first with `player_clients`, then with the `yt-dlp` defaults if that fails.
-pub async fn resolve(config: &YoutubeConfig, query: &QueryType) -> Result<TrackRef, YoutubeError> {
-    match resolve_with(config, query, Clients::Preferred).await {
+/// Finds the track or the playlist, first with `player_clients`, then with the `yt-dlp`
+/// defaults if that fails. A playlist gives at most `max_playlist_len` tracks.
+pub async fn resolve(
+    config: &YoutubeConfig,
+    query: &QueryType,
+    max_playlist_len: NonZeroUsize,
+) -> Result<Found, YoutubeError> {
+    match resolve_with(config, query, max_playlist_len, Clients::Preferred).await {
         Err(YoutubeError::Failed { .. }) if !config.player_clients.is_empty() => {
             warn!("yt-dlp lookup failed with the preferred clients, retrying with its defaults");
-            resolve_with(config, query, Clients::Default).await
+            resolve_with(config, query, max_playlist_len, Clients::Default).await
         }
         result => result,
     }
@@ -147,29 +191,45 @@ pub async fn resolve(config: &YoutubeConfig, query: &QueryType) -> Result<TrackR
 pub async fn resolve_with(
     config: &YoutubeConfig,
     query: &QueryType,
+    max_playlist_len: NonZeroUsize,
     clients: Clients,
-) -> Result<TrackRef, YoutubeError> {
-    let target = match query {
+) -> Result<Found, YoutubeError> {
+    let (target, limit) = match query {
         QueryType::Link(url) => match parse_link(url)? {
-            YoutubeLink::Video(video_id) => video_id.url(),
+            YoutubeLink::Video(video_id) => (video_id.url(), None),
+            YoutubeLink::Playlist(playlist_id) => (playlist_id.url(), Some(max_playlist_len)),
         },
-        QueryType::Phrase(phrase) => format!("ytsearch1:{phrase}"),
+        QueryType::Phrase(phrase) => (format!("ytsearch1:{phrase}"), None),
     };
-    let json = lookup(config, &target, clients).await?;
-    parse_output(&json)
+    let json = lookup(config, &target, limit, clients).await?;
+    let mut found = parse_output(&json)?;
+    match query {
+        QueryType::Phrase(_) => {
+            found.tracks.truncate(1);
+            found.playlist = None;
+        }
+        // A playlist link always keeps its playlist, even with one video or a short limit.
+        QueryType::Link(_) if limit.is_none() => found.playlist = None,
+        QueryType::Link(_) => {}
+    }
+    Ok(found)
 }
 
-/// One `yt-dlp` run that prints JSON about `target`.
+/// One `yt-dlp` run that prints JSON about `target`, a playlist cut to `limit` entries.
 async fn lookup(
     config: &YoutubeConfig,
     target: &str,
+    limit: Option<NonZeroUsize>,
     clients: Clients,
 ) -> Result<Vec<u8>, YoutubeError> {
     let mut cmd = yt_dlp_command(config, clients);
+    // Private and deleted videos are left out of playlists instead of listed under a placeholder.
     cmd.args(["--flat-playlist", "--dump-single-json"])
-        .arg("--")
-        .arg(target)
-        .stdin(Stdio::null());
+        .args(["--compat-options", "no-youtube-unavailable-videos"]);
+    if let Some(limit) = limit {
+        cmd.arg("--playlist-items").arg(format!("1:{limit}"));
+    }
+    cmd.arg("--").arg(target).stdin(Stdio::null());
     let mut cmd = Command::from(cmd);
     // `timeout` drops the future when time runs out, this kills the process with it.
     cmd.kill_on_drop(true);
@@ -233,8 +293,15 @@ fn yt_dlp_command(config: &YoutubeConfig, clients: Clients) -> std::process::Com
 enum Output {
     /// A link to a single video.
     Video(Entry),
-    /// A `ytsearch1:` search, empty when nothing was found.
-    Playlist { entries: Vec<Entry> },
+    /// A playlist, or a `ytsearch1:` search that is empty when nothing was found.
+    Playlist {
+        #[serde(default)]
+        title: Option<String>,
+        /// The whole playlist, `entries` holds at most the requested part of it.
+        #[serde(default)]
+        playlist_count: Option<usize>,
+        entries: Vec<Entry>,
+    },
 }
 
 /// Only the fields the bot needs, `yt-dlp` sends hundreds more.
@@ -244,19 +311,40 @@ struct Entry {
     title: String,
 }
 
+impl Entry {
+    fn into_track(self) -> Result<TrackRef, InvalidId> {
+        Ok(TrackRef {
+            location: Location::Youtube(self.id.parse()?),
+            title: self.title,
+        })
+    }
+}
+
 /// The id is checked again, the output of `yt-dlp` is not trusted.
-// TODO: reject live streams (`live_status`), they never end and would block the queue.
-pub(super) fn parse_output(json: &[u8]) -> Result<TrackRef, YoutubeError> {
-    let entry = match serde_json::from_slice(json).map_err(YoutubeError::Json)? {
-        Output::Video(entry) => entry,
-        Output::Playlist { entries } => {
-            entries.into_iter().next().ok_or(YoutubeError::NoResults)?
-        }
+/// A playlist shape always gives `playlist`, `resolve_with` drops it for a search.
+// TODO: reject upcoming streams (`live_status` "is_upcoming"), they cannot be played yet.
+pub(super) fn parse_output(json: &[u8]) -> Result<Found, YoutubeError> {
+    let found = match serde_json::from_slice(json).map_err(YoutubeError::Json)? {
+        Output::Video(entry) => Found::track(entry.into_track()?),
+        Output::Playlist {
+            title,
+            playlist_count,
+            entries,
+        } => Found {
+            tracks: entries
+                .into_iter()
+                .map(Entry::into_track)
+                .collect::<Result<_, _>>()?,
+            playlist: Some(Playlist {
+                title: title.unwrap_or_default(),
+                total: playlist_count,
+            }),
+        },
     };
-    Ok(TrackRef {
-        location: Location::Youtube(entry.id.parse()?),
-        title: entry.title,
-    })
+    if found.tracks.is_empty() {
+        return Err(YoutubeError::NoResults);
+    }
+    Ok(found)
 }
 
 /// Starts `yt-dlp` writing the audio of `id` to its stdout, nothing is saved to disk.

@@ -1,6 +1,7 @@
 use std::{
     fs,
     io::Read,
+    num::NonZeroUsize,
     os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
     time::{Duration, Instant},
@@ -13,15 +14,17 @@ use crate::{
     audio::AudioInput,
     config::YoutubeConfig,
     sources::{
-        Location, QueryType, TrackRef,
+        Location, Playlist, QueryType, TrackRef,
         youtube::{
-            Clients, InvalidVideoId, LinkError, VideoId, YoutubeError, YoutubeLink, open,
+            Clients, InvalidId, LinkError, PlaylistId, VideoId, YoutubeError, YoutubeLink, open,
             open_with, parse_link, parse_output, resolve, resolve_with,
         },
     },
 };
 
-fn parse(text: &str) -> Result<VideoId, InvalidVideoId> {
+const LIMIT: NonZeroUsize = NonZeroUsize::new(100).unwrap();
+
+fn parse(text: &str) -> Result<VideoId, InvalidId> {
     text.parse()
 }
 
@@ -33,9 +36,9 @@ fn dash_and_underscore_are_valid_anywhere() {
 
 #[test]
 fn wrong_length_is_invalid() {
-    assert_eq!(parse(""), Err(InvalidVideoId));
-    assert_eq!(parse("5NV6Rdv1a3"), Err(InvalidVideoId));
-    assert_eq!(parse("5NV6Rdv1a3Ix"), Err(InvalidVideoId));
+    assert_eq!(parse(""), Err(InvalidId));
+    assert_eq!(parse("5NV6Rdv1a3"), Err(InvalidId));
+    assert_eq!(parse("5NV6Rdv1a3Ix"), Err(InvalidId));
 }
 
 #[test]
@@ -47,7 +50,7 @@ fn characters_outside_the_alphabet_are_invalid() {
         "5NV6Rdv1a3=",
         "5NV6Rdv1a3.",
     ] {
-        assert_eq!(parse(text), Err(InvalidVideoId), "{text:?}");
+        assert_eq!(parse(text), Err(InvalidId), "{text:?}");
     }
 }
 
@@ -55,7 +58,7 @@ fn characters_outside_the_alphabet_are_invalid() {
 fn non_ascii_with_eleven_bytes_is_invalid() {
     let text = "ą5NV6Rdv1a";
     assert_eq!(text.len(), 11);
-    assert_eq!(parse(text), Err(InvalidVideoId));
+    assert_eq!(parse(text), Err(InvalidId));
 }
 
 #[test]
@@ -126,14 +129,98 @@ fn links_without_a_video_are_no_video() {
     }
 }
 
+fn playlist(id: &str) -> Result<YoutubeLink, LinkError> {
+    Ok(YoutubeLink::Playlist(id.parse().unwrap()))
+}
+
 #[test]
-fn playlist_links_are_not_supported_yet() {
-    for text in [
-        "https://www.youtube.com/playlist?list=PLxyz",
-        "https://music.youtube.com/playlist?list=OLAK5uy_abc",
+fn playlist_links_give_the_playlist() {
+    for (text, id) in [
+        (
+            "https://www.youtube.com/playlist?list=PLFgquLnL59alCl_2TQvOiD5Vgm1hCaGSI",
+            "PLFgquLnL59alCl_2TQvOiD5Vgm1hCaGSI",
+        ),
+        (
+            "https://youtube.com/playlist?list=PLFgquLnL59alCl_2TQvOiD5Vgm1hCaGSI",
+            "PLFgquLnL59alCl_2TQvOiD5Vgm1hCaGSI",
+        ),
+        (
+            "https://m.youtube.com/playlist?list=PLFgquLnL59alCl_2TQvOiD5Vgm1hCaGSI",
+            "PLFgquLnL59alCl_2TQvOiD5Vgm1hCaGSI",
+        ),
+        (
+            "https://music.youtube.com/playlist?list=OLAK5uy_nBqgVkx4qQ8n0aO3abcdefghijklmnopq",
+            "OLAK5uy_nBqgVkx4qQ8n0aO3abcdefghijklmnopq",
+        ),
+        (
+            "https://www.youtube.com/playlist?si=abc&list=UUuAXFkgsw1L7xaCfnd5JJOw#top",
+            "UUuAXFkgsw1L7xaCfnd5JJOw",
+        ),
     ] {
-        assert_eq!(link(text), Err(LinkError::PlaylistNotSupported), "{text}");
+        assert_eq!(link(text), playlist(id), "{text}");
     }
+}
+
+#[test]
+fn video_in_a_playlist_gives_only_the_video() {
+    for text in [
+        "https://www.youtube.com/watch?v=5NV6Rdv1a3I&list=PLFgquLnL59alCl_2TQvOiD5Vgm1hCaGSI&index=5",
+        "https://youtu.be/5NV6Rdv1a3I?list=PLFgquLnL59alCl_2TQvOiD5Vgm1hCaGSI",
+        "https://music.youtube.com/watch?v=5NV6Rdv1a3I&list=OLAK5uy_nBqgVkx4qQ8n0aO3abcdefghijklmnopq",
+        "https://www.youtube.com/watch?v=5NV6Rdv1a3I&list=RD5NV6Rdv1a3I",
+    ] {
+        assert_eq!(link(text), video("5NV6Rdv1a3I"), "{text}");
+    }
+}
+
+#[test]
+fn mixes_are_not_supported() {
+    for text in [
+        "https://www.youtube.com/playlist?list=RD5NV6Rdv1a3I",
+        "https://music.youtube.com/playlist?list=RDAMVM5NV6Rdv1a3I",
+    ] {
+        assert_eq!(link(text), Err(LinkError::MixNotSupported), "{text}");
+    }
+}
+
+#[test]
+fn playlist_page_without_a_list_is_no_playlist() {
+    for text in [
+        "https://www.youtube.com/playlist",
+        "https://www.youtube.com/playlist?v=5NV6Rdv1a3I",
+    ] {
+        assert_eq!(link(text), Err(LinkError::NoPlaylist), "{text}");
+    }
+}
+
+#[test]
+fn invalid_playlist_id_is_rejected() {
+    for text in [
+        "https://www.youtube.com/playlist?list=",
+        "https://www.youtube.com/playlist?list=PL%20xyz",
+        "https://www.youtube.com/playlist?list=PL.xyz",
+        "https://www.youtube.com/playlist?list=PL%2Fxyz",
+    ] {
+        assert_eq!(link(text), Err(LinkError::InvalidId(InvalidId)), "{text}");
+    }
+}
+
+#[test]
+fn playlist_url_points_to_the_playlist_page() {
+    let id: PlaylistId = "PLFgquLnL59alCl_2TQvOiD5Vgm1hCaGSI".parse().unwrap();
+    assert_eq!(
+        id.url(),
+        "https://www.youtube.com/playlist?list=PLFgquLnL59alCl_2TQvOiD5Vgm1hCaGSI"
+    );
+}
+
+#[test]
+fn playlist_id_length_is_limited() {
+    assert_eq!("".parse::<PlaylistId>(), Err(InvalidId));
+    assert_eq!("P".parse::<PlaylistId>(), Err(InvalidId));
+    assert!("PL".parse::<PlaylistId>().is_ok());
+    assert!("P".repeat(64).parse::<PlaylistId>().is_ok());
+    assert_eq!("P".repeat(65).parse::<PlaylistId>(), Err(InvalidId));
 }
 
 #[test]
@@ -144,11 +231,7 @@ fn invalid_id_in_a_link_is_rejected() {
         "https://youtu.be/watch",
         "https://www.youtube.com/shorts/bad%20id%20xx",
     ] {
-        assert_eq!(
-            link(text),
-            Err(LinkError::InvalidId(InvalidVideoId)),
-            "{text}"
-        );
+        assert_eq!(link(text), Err(LinkError::InvalidId(InvalidId)), "{text}");
     }
 }
 
@@ -195,20 +278,79 @@ fn entry(id: &str, title: &str) -> String {
 
 #[test]
 fn video_output_gives_its_track() {
-    let track_ref = parse_output(VIDEO_JSON.as_bytes()).unwrap();
-    assert_eq!(track_ref, track("5NV6Rdv1a3I", "Daft Punk - Get Lucky"));
+    let found = parse_output(VIDEO_JSON.as_bytes()).unwrap();
+    assert_eq!(
+        found.tracks,
+        [track("5NV6Rdv1a3I", "Daft Punk - Get Lucky")]
+    );
+    assert_eq!(found.playlist, None);
 }
 
 #[test]
-fn search_output_gives_the_first_entry() {
+fn playlist_output_gives_its_title_and_size() {
+    let json = r#"{"_type": "playlist", "id": "PLx", "title": "Popular Music Videos", "playlist_count": 182, "entries": [{"_type": "url", "id": "fOT0BUpITw8", "title": "BELLAKEO"}]}"#;
+    assert_eq!(
+        parse_output(json.as_bytes()).unwrap().playlist,
+        Some(Playlist {
+            title: "Popular Music Videos".to_owned(),
+            total: Some(182),
+        })
+    );
+}
+
+#[test]
+fn playlist_output_without_a_size_or_title_is_accepted() {
+    let json = format!(
+        r#"{{"_type": "playlist", "entries": [{}]}}"#,
+        entry("fOT0BUpITw8", "x")
+    );
+    assert_eq!(
+        parse_output(json.as_bytes()).unwrap().playlist,
+        Some(Playlist {
+            title: String::new(),
+            total: None,
+        })
+    );
+}
+
+#[test]
+fn playlist_output_gives_every_entry_in_order() {
     let json = search_json(&format!(
-        "{},{}",
+        "{},{},{}",
         entry("5NV6Rdv1a3I", "first"),
-        entry("-abc_def-gh", "second")
+        entry("-abc_def-gh", "second"),
+        entry("fOT0BUpITw8", "third")
     ));
     assert_eq!(
-        parse_output(json.as_bytes()).unwrap(),
-        track("5NV6Rdv1a3I", "first")
+        parse_output(json.as_bytes()).unwrap().tracks,
+        [
+            track("5NV6Rdv1a3I", "first"),
+            track("-abc_def-gh", "second"),
+            track("fOT0BUpITw8", "third"),
+        ]
+    );
+}
+
+#[test]
+fn invalid_id_anywhere_in_a_playlist_rejects_it() {
+    let json = search_json(&format!(
+        "{},{}",
+        entry("5NV6Rdv1a3I", "good"),
+        entry("../../etc/x", "bad")
+    ));
+    let result = parse_output(json.as_bytes());
+    assert!(
+        matches!(result, Err(YoutubeError::InvalidId(_))),
+        "{result:?}"
+    );
+}
+
+#[test]
+fn real_playlist_shape_is_understood() {
+    let json = r#"{"_type": "playlist", "id": "PLFgquLnL59alCl_2TQvOiD5Vgm1hCaGSI", "title": "Popular Music Videos", "playlist_count": 182, "availability": "public", "entries": [{"_type": "url", "ie_key": "Youtube", "id": "fOT0BUpITw8", "title": "BELLAKEO", "url": "https://www.youtube.com/watch?v=fOT0BUpITw8", "duration": 235, "live_status": null, "availability": null}]}"#;
+    assert_eq!(
+        parse_output(json.as_bytes()).unwrap().tracks,
+        [track("fOT0BUpITw8", "BELLAKEO")]
     );
 }
 
@@ -222,7 +364,7 @@ fn empty_search_is_no_results() {
 fn title_keeps_unicode_and_escapes() {
     let json = search_json(&entry("5NV6Rdv1a3I", r#"Kult - Arahja \"live\" żółć 🎵"#));
     assert_eq!(
-        parse_output(json.as_bytes()).unwrap().title,
+        parse_output(json.as_bytes()).unwrap().tracks[0].title,
         "Kult - Arahja \"live\" żółć 🎵"
     );
 }
@@ -283,28 +425,48 @@ fn error_messages_do_not_leak_details() {
 #[ignore = "runs yt-dlp and needs the network"]
 async fn real_search_finds_a_video() {
     let query = QueryType::Phrase("daft punk get lucky".to_owned());
-    let track_ref = resolve(&config(Path::new("yt-dlp")), &query).await.unwrap();
-    assert!(matches!(track_ref.location, Location::Youtube(_)));
-    assert!(!track_ref.title.is_empty());
+    let tracks = resolve(&config(Path::new("yt-dlp")), &query, LIMIT)
+        .await
+        .unwrap()
+        .tracks;
+    assert_eq!(tracks.len(), 1);
+    assert!(matches!(tracks[0].location, Location::Youtube(_)));
+    assert!(!tracks[0].title.is_empty());
 }
 
 #[tokio::test]
 #[ignore = "runs yt-dlp and needs the network"]
 async fn real_link_gives_its_video() {
     let url = Url::parse("https://youtu.be/5NV6Rdv1a3I").unwrap();
-    let track_ref = resolve(&config(Path::new("yt-dlp")), &QueryType::Link(url))
+    let tracks = resolve(&config(Path::new("yt-dlp")), &QueryType::Link(url), LIMIT)
         .await
-        .unwrap();
+        .unwrap()
+        .tracks;
+    assert_eq!(tracks.len(), 1);
     assert_eq!(
-        track_ref.location,
+        tracks[0].location,
         Location::Youtube("5NV6Rdv1a3I".parse().unwrap())
     );
 }
 
 #[tokio::test]
+#[ignore = "runs yt-dlp and needs the network"]
+async fn real_playlist_gives_its_videos() {
+    let url =
+        Url::parse("https://www.youtube.com/playlist?list=PLFgquLnL59alCl_2TQvOiD5Vgm1hCaGSI")
+            .unwrap();
+    let tracks = resolve(&config(Path::new("yt-dlp")), &QueryType::Link(url), LIMIT)
+        .await
+        .unwrap()
+        .tracks;
+    assert!(tracks.len() > 1, "{}", tracks.len());
+    assert!(tracks.iter().all(|track| !track.title.is_empty()));
+}
+
+#[tokio::test]
 async fn missing_yt_dlp_is_a_spawn_error() {
     let query = QueryType::Phrase("x".to_owned());
-    let result = resolve(&config(Path::new("/nonexistent/yt-dlp")), &query).await;
+    let result = resolve(&config(Path::new("/nonexistent/yt-dlp")), &query, LIMIT).await;
     assert!(matches!(result, Err(YoutubeError::Spawn(_))), "{result:?}");
 }
 
@@ -471,8 +633,8 @@ JSON"#
     );
     let (dir, path) = fake_yt_dlp(&logged(&script));
     let query = QueryType::Phrase("get lucky".to_owned());
-    let track_ref = resolve(&config(&path), &query).await.unwrap();
-    assert_eq!(track_ref, track("5NV6Rdv1a3I", "Daft Punk - Get Lucky"));
+    let tracks = resolve(&config(&path), &query, LIMIT).await.unwrap().tracks;
+    assert_eq!(tracks, [track("5NV6Rdv1a3I", "Daft Punk - Get Lucky")]);
 
     let runs = runs(&dir);
     assert_eq!(runs.len(), 2);
@@ -489,7 +651,7 @@ async fn lookup_without_player_clients_is_not_retried() {
         ..config(&path)
     };
     let query = QueryType::Phrase("x".to_owned());
-    let result = resolve(&config, &query).await;
+    let result = resolve(&config, &query, LIMIT).await;
     assert!(
         matches!(result, Err(YoutubeError::Failed { .. })),
         "{result:?}"
@@ -501,7 +663,7 @@ async fn lookup_without_player_clients_is_not_retried() {
 async fn bad_output_is_not_retried() {
     let (dir, path) = fake_yt_dlp(&logged("printf 'not json'"));
     let query = QueryType::Phrase("x".to_owned());
-    let result = resolve(&config(&path), &query).await;
+    let result = resolve(&config(&path), &query, LIMIT).await;
     assert!(matches!(result, Err(YoutubeError::Json(_))), "{result:?}");
     assert_eq!(runs(&dir).len(), 1);
 }
@@ -551,7 +713,7 @@ fn open_with_uses_the_given_clients() {
 async fn resolve_with_tries_only_once() {
     let (dir, path) = fake_yt_dlp(&logged("exit 1"));
     let query = QueryType::Phrase("x".to_owned());
-    let result = resolve_with(&config(&path), &query, Clients::Preferred).await;
+    let result = resolve_with(&config(&path), &query, LIMIT, Clients::Preferred).await;
     assert!(
         matches!(result, Err(YoutubeError::Failed { .. })),
         "{result:?}"
@@ -568,10 +730,95 @@ JSON"#
     );
     let (dir, path) = fake_yt_dlp(&logged(&script));
     let query = QueryType::Phrase("get lucky".to_owned());
-    resolve_with(&config(&path), &query, Clients::Default)
+    resolve_with(&config(&path), &query, LIMIT, Clients::Default)
         .await
         .unwrap();
     assert!(!runs(&dir)[0].contains("--extractor-args"));
+}
+
+fn playlist_script() -> String {
+    let json = search_json(&format!(
+        "{},{}",
+        entry("5NV6Rdv1a3I", "first"),
+        entry("-abc_def-gh", "second")
+    ));
+    format!(
+        r#"cat <<'JSON'
+{json}
+JSON"#
+    )
+}
+
+#[tokio::test]
+async fn phrase_gives_only_the_first_result() {
+    let (_dir, path) = fake_yt_dlp(&playlist_script());
+    let query = QueryType::Phrase("daft punk".to_owned());
+    let found = resolve(&config(&path), &query, LIMIT).await.unwrap();
+    assert_eq!(found.tracks, [track("5NV6Rdv1a3I", "first")]);
+    assert_eq!(found.playlist, None);
+}
+
+#[tokio::test]
+async fn playlist_link_gives_every_video() {
+    let (dir, path) = fake_yt_dlp(&logged(&playlist_script()));
+    let url =
+        Url::parse("https://www.youtube.com/playlist?list=PLFgquLnL59alCl_2TQvOiD5Vgm1hCaGSI")
+            .unwrap();
+    let found = resolve(&config(&path), &QueryType::Link(url), LIMIT)
+        .await
+        .unwrap();
+    assert_eq!(
+        found.tracks,
+        [
+            track("5NV6Rdv1a3I", "first"),
+            track("-abc_def-gh", "second")
+        ]
+    );
+    assert_eq!(found.playlist.unwrap().title, "daft punk");
+    assert!(
+        runs(&dir)[0].ends_with(
+            "-- https://www.youtube.com/playlist?list=PLFgquLnL59alCl_2TQvOiD5Vgm1hCaGSI"
+        )
+    );
+}
+
+#[tokio::test]
+async fn playlist_link_asks_only_for_the_limit() {
+    let (dir, path) = fake_yt_dlp(&logged(&playlist_script()));
+    let url =
+        Url::parse("https://www.youtube.com/playlist?list=PLFgquLnL59alCl_2TQvOiD5Vgm1hCaGSI")
+            .unwrap();
+    let limit = NonZeroUsize::new(25).unwrap();
+    resolve(&config(&path), &QueryType::Link(url), limit)
+        .await
+        .unwrap();
+    assert!(runs(&dir)[0].contains("--playlist-items 1:25 --"));
+}
+
+#[tokio::test]
+async fn video_link_and_phrase_ask_for_no_limit() {
+    let (dir, path) = fake_yt_dlp(&logged(&playlist_script()));
+    let url = Url::parse("https://www.youtube.com/watch?v=5NV6Rdv1a3I&list=PLxyz").unwrap();
+    let found = resolve(&config(&path), &QueryType::Link(url), LIMIT)
+        .await
+        .unwrap();
+    assert_eq!(found.playlist, None);
+    resolve(&config(&path), &QueryType::Phrase("x".to_owned()), LIMIT)
+        .await
+        .unwrap();
+    assert!(
+        runs(&dir)
+            .iter()
+            .all(|run| !run.contains("--playlist-items"))
+    );
+}
+
+#[tokio::test]
+async fn lookup_skips_unavailable_videos() {
+    let (dir, path) = fake_yt_dlp(&logged(&playlist_script()));
+    let query = QueryType::Phrase("x".to_owned());
+    resolve(&config(&path), &query, LIMIT).await.unwrap();
+    assert!(runs(&dir)[0].contains("--compat-options no-youtube-unavailable-videos"));
 }
 
 const AGE_GATE: &str = "echo 'ERROR: [youtube] Tq92D6wQ1mg: Sign in to confirm your age. This video may be inappropriate for some users.' >&2; exit 1";
@@ -580,7 +827,7 @@ const AGE_GATE: &str = "echo 'ERROR: [youtube] Tq92D6wQ1mg: Sign in to confirm y
 async fn age_restricted_lookup_is_not_retried() {
     let (dir, path) = fake_yt_dlp(&logged(AGE_GATE));
     let query = QueryType::Phrase("x".to_owned());
-    let result = resolve(&config(&path), &query).await;
+    let result = resolve(&config(&path), &query, LIMIT).await;
     assert!(
         matches!(result, Err(YoutubeError::AgeRestricted)),
         "{result:?}"
@@ -605,7 +852,7 @@ async fn every_age_gate_reason_is_recognised() {
     ] {
         let (_dir, path) = fake_yt_dlp(&format!("echo 'ERROR: {reason}' >&2; exit 1"));
         let query = QueryType::Phrase("x".to_owned());
-        let result = resolve_with(&config(&path), &query, Clients::Default).await;
+        let result = resolve_with(&config(&path), &query, LIMIT, Clients::Default).await;
         assert!(
             matches!(result, Err(YoutubeError::AgeRestricted)),
             "{reason}: {result:?}"
@@ -618,7 +865,7 @@ async fn other_failures_stay_failed() {
     let (_dir, path) =
         fake_yt_dlp("echo 'ERROR: [youtube] x: This video is unavailable' >&2; exit 1");
     let query = QueryType::Phrase("x".to_owned());
-    let result = resolve_with(&config(&path), &query, Clients::Default).await;
+    let result = resolve_with(&config(&path), &query, LIMIT, Clients::Default).await;
     assert!(
         matches!(result, Err(YoutubeError::Failed { .. })),
         "{result:?}"
@@ -637,7 +884,7 @@ fn age_restricted_message_is_safe_for_the_chat() {
 #[ignore = "runs yt-dlp and needs the network"]
 async fn real_age_restricted_video_is_recognised() {
     let url = Url::parse("https://www.youtube.com/watch?v=Tq92D6wQ1mg").unwrap();
-    let result = resolve(&config(Path::new("yt-dlp")), &QueryType::Link(url)).await;
+    let result = resolve(&config(Path::new("yt-dlp")), &QueryType::Link(url), LIMIT).await;
     assert!(
         matches!(result, Err(YoutubeError::AgeRestricted)),
         "{result:?}"

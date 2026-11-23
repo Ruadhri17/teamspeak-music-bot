@@ -88,6 +88,15 @@ Examples:
 
 **Links** work for everything. The bot recognizes the service and whether the link points to a track, an album or a playlist. You don't need any flags for links. An album or playlist link adds all its tracks in the original order.
 
+YouTube links:
+
+- `youtube.com/watch?v=...`, `youtu.be/...`, `/shorts/...`, `/live/...` and `music.youtube.com/watch?v=...` add one video.
+- `youtube.com/playlist?list=...` (also on `music.youtube.com`) adds the whole playlist. Private and deleted videos are skipped.
+- A video opened from a playlist (`watch?v=...&list=...`) adds **only that video**, so you don't get a whole playlist by accident. To add the playlist, open it and copy the link of the playlist page.
+- YouTube **mixes** (playlists starting with `RD`, made by YouTube while you listen) are not supported. Add a single video or a regular playlist instead.
+- One playlist link adds at most **100** songs by default (the bot administrator may change the limit). The rest of the playlist is left out.
+- Live streams play until you skip them with `!song next`. Streams that have not started yet cannot be played.
+
 **Search phrases** are free text, passed to the service's search just as you typed them. You can write the title alone, the artist and the title, the title and the artist, and so on. The bot adds the **first result**.
 
 - By default the bot searches for a **track** (`--track`).
@@ -104,8 +113,10 @@ Examples:
 
 After adding:
 
-- If nothing is playing, the song starts immediately. Otherwise it goes to the **end of the queue**, and the bot replies with its position, e.g. `Added: Get Lucky - Daft Punk (position 3)`.
-- Long albums and playlists are added in the background, so you can keep using commands in the meantime.
+- If nothing is playing, the song starts immediately. Otherwise it goes to the **end of the queue**. Adding a single song gives no reply, the bot only answers when something goes wrong.
+- After a playlist the bot says how many songs it added, e.g. `added 37 songs from Chill Evening`, or `added 100 of 182 songs from ...` when part of the playlist was over the limit.
+- Searching and adding happen in the background, so you can keep using commands in the meantime. Songs keep the order of your commands, even when a later search finishes first.
+- If the queue fills up in the middle of a playlist, the bot adds what fits and tells you how many songs that was.
 - If a track is unavailable, the bot says so and moves on to the next one.
 - The queue has no length limit by default (the bot administrator may set one).
 

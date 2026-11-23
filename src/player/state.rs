@@ -3,7 +3,10 @@
 use tokio::task::Id;
 use tokio_util::sync::CancellationToken;
 
-use crate::{client::ReplyTo, sources::TrackRef};
+use crate::{
+    client::ReplyTo,
+    sources::{Found, TrackRef},
+};
 
 /// Identifies one playback, so a late "finished" from an old track can be told apart.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -53,5 +56,5 @@ pub(super) struct Pending {
     /// Where an error goes, the place the command came from.
     pub(super) reply_to: ReplyTo,
     /// `None` while the lookup runs.
-    pub(super) result: Option<Result<TrackRef, String>>,
+    pub(super) result: Option<Result<Found, String>>,
 }

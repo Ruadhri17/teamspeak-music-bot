@@ -145,3 +145,17 @@ fn queue_sizes_reject_zero() {
     assert!(parse("[queue]\nmax_len = 0\n").is_err());
     assert!(parse("[queue]\nshow_page_size = 0\n").is_err());
 }
+
+#[test]
+fn max_playlist_len_defaults_to_100() {
+    assert_eq!(
+        parse("").unwrap().sources.max_playlist_len,
+        NonZeroUsize::new(100).unwrap()
+    );
+    let config = parse("[sources]\nmax_playlist_len = 500\n").unwrap();
+    assert_eq!(
+        config.sources.max_playlist_len,
+        NonZeroUsize::new(500).unwrap()
+    );
+    assert!(parse("[sources]\nmax_playlist_len = 0\n").is_err());
+}

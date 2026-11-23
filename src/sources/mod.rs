@@ -22,6 +22,32 @@ pub struct TrackRef {
     pub title: String,
 }
 
+/// What a lookup found: one track, or the tracks of a playlist in order.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Found {
+    /// Never empty.
+    pub tracks: Vec<TrackRef>,
+    /// `Some` when the query was a playlist.
+    pub playlist: Option<Playlist>,
+}
+
+impl Found {
+    pub fn track(track: TrackRef) -> Self {
+        Self {
+            tracks: vec![track],
+            playlist: None,
+        }
+    }
+}
+
+/// A playlist the tracks of a `Found` come from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Playlist {
+    pub title: String,
+    /// Videos in the whole playlist, also those over `max_playlist_len`. `None` when unknown.
+    pub total: Option<usize>,
+}
+
 /// Where a track comes from, one variant per source with its own identifier.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Location {

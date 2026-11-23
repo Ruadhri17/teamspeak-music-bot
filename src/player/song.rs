@@ -17,7 +17,7 @@ use crate::{
     client::ReplyTo,
     config::{SourceKind, SourcesConfig, Volume},
     sources::{
-        Location, QueryType, TrackRef, local,
+        Found, Location, QueryType, TrackRef, local,
         youtube::{self, YoutubeError},
     },
 };
@@ -36,11 +36,8 @@ impl Player {
 
     /// Stores the result of a lookup, then queues every finished lookup at the front of
     /// `pending`. A track starts when nothing plays, a paused track stays paused.
-    /// Errors go to the place the command came from.
-    pub(super) fn lookup_done(
-        &mut self,
-        joined: Result<(Id, Result<TrackRef, String>), JoinError>,
-    ) {
+    /// Errors and the summary of a playlist go to the place the command came from.
+    pub(super) fn lookup_done(&mut self, joined: Result<(Id, Result<Found, String>), JoinError>) {
         let (task, result) = match joined {
             Ok(done) => done,
             // Aborted by `!queue clear`, which also removed the entry.
@@ -55,15 +52,48 @@ impl Player {
         }
 
         while let Some(entry) = self.pending.pop_front_if(|entry| entry.result.is_some()) {
-            let queued = entry
-                .result
-                .expect("only finished entries are taken")
-                .and_then(|track| self.queue.push(track).map_err(|err| err.to_string()));
-            match queued {
-                Ok(()) if matches!(self.state, State::Idle) => self.play_next(),
-                Ok(()) => {}
-                Err(text) => self.outbox.push((entry.reply_to, text)),
+            let found = match entry.result.expect("only finished entries are taken") {
+                Ok(found) => found,
+                Err(text) => {
+                    self.outbox.push((entry.reply_to, text));
+                    continue;
+                }
+            };
+            if let Some(text) = self.enqueue_found(found) {
+                self.outbox.push((entry.reply_to, text));
             }
+        }
+    }
+
+    /// Queues the tracks until the queue is full. Returns the message for the sender:
+    /// a full queue, or the summary of a playlist. A single track that fits is silent.
+    fn enqueue_found(&mut self, Found { tracks, playlist }: Found) -> Option<String> {
+        let count = tracks.len();
+        let mut added = 0;
+        let mut full = None;
+        for track in tracks {
+            if let Err(err) = self.queue.push(track) {
+                full = Some(err);
+                break;
+            }
+            added += 1;
+            if let State::Idle = self.state {
+                self.play_next();
+            }
+        }
+
+        let total = playlist
+            .as_ref()
+            .and_then(|playlist| playlist.total)
+            .map_or(count, |total| total.max(count));
+        let summary = || match &playlist {
+            Some(playlist) => added_from(added, total, &playlist.title),
+            None => format!("added {added} of {total} songs"),
+        };
+        match full {
+            Some(full) if added == 0 => Some(full.to_string()),
+            Some(full) => Some(format!("{full}, {}", summary())),
+            None => playlist.is_some().then(summary),
         }
     }
 
@@ -235,17 +265,19 @@ async fn resolve(
     sources: SourcesConfig,
     query: QueryType,
     source: Option<SourceKind>,
-) -> Result<TrackRef, String> {
+) -> Result<Found, String> {
     match source.unwrap_or(sources.default) {
         SourceKind::Tidal | SourceKind::Spotify | SourceKind::Soundcloud => {
             Err("this source is not supported yet".to_string())
         }
-        SourceKind::Youtube => youtube::resolve(&sources.youtube, &query)
+        SourceKind::Youtube => youtube::resolve(&sources.youtube, &query, sources.max_playlist_len)
             .await
             .map_err(|err| err.to_string()),
         SourceKind::Local => match query {
             QueryType::Phrase(path) => {
-                local::resolve(music_dir(&sources)?, &path).map_err(|err| err.to_string())
+                let track =
+                    local::resolve(music_dir(&sources)?, &path).map_err(|err| err.to_string())?;
+                Ok(Found::track(track))
             }
             QueryType::Link(_) => Err("the local source takes a path, not a link".to_string()),
         },
@@ -259,6 +291,18 @@ fn music_dir(sources: &SourcesConfig) -> Result<&std::path::Path, String> {
         .music_dir
         .as_deref()
         .ok_or_else(|| "the local source is disabled".to_string())
+}
+
+/// `added 3 songs from X`, or `added 100 of 182 songs from X` when part of the playlist
+/// was left out. The title comes from outside the bot, so it is escaped.
+fn added_from(added: usize, total: usize, title: &str) -> String {
+    let songs = if total == 1 { "song" } else { "songs" };
+    let title = chat::escape(title);
+    if added < total {
+        format!("added {added} of {total} {songs} from {title}")
+    } else {
+        format!("added {added} {songs} from {title}")
+    }
 }
 
 /// The title comes from outside the bot, so it is escaped.

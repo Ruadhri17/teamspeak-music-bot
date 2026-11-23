@@ -28,7 +28,7 @@ use crate::{
     client::{AudioControl, ClientEvent, ClientRequest, ReplyTo},
     commands::Command,
     config::{Config, SourcesConfig, Volume},
-    sources::TrackRef,
+    sources::Found,
 };
 use queue::Queue;
 use state::{Ended, Pending, State};
@@ -42,7 +42,7 @@ pub struct Player {
     /// The ID for the next playback, only ever goes up.
     next_id: u64,
     /// Lookups started by `!song add`, matched to `pending` by task ID.
-    lookups: JoinSet<Result<TrackRef, String>>,
+    lookups: JoinSet<Result<Found, String>>,
     /// The lookups in the order of the commands, a finished one waits for those before it.
     pending: VecDeque<Pending>,
     /// Chat messages from the client, the source of commands.

@@ -49,6 +49,10 @@ impl Harness {
     }
 
     pub fn with_yt_dlp(script: &str) -> Self {
+        Self::with_yt_dlp_and(script, |_| {})
+    }
+
+    pub fn with_yt_dlp_and(script: &str, edit: impl FnOnce(&mut Config)) -> Self {
         let scripts = tempfile::tempdir().unwrap();
         let path = scripts.path().join("yt-dlp");
         let source = scripts.path().join("yt-dlp.src");
@@ -64,6 +68,7 @@ impl Harness {
         let mut harness = Self::with_config(|config| {
             config.sources.default = SourceKind::Youtube;
             config.sources.youtube.yt_dlp_path = path;
+            edit(config);
         });
         harness.scripts = Some(scripts);
         harness

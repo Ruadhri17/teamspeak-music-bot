@@ -70,6 +70,7 @@ blocked_groups = []                 # [live] e.g. ["Guest"], admin takes precede
 
 [sources]
 default = "youtube"                 # [live] tidal | spotify | youtube | soundcloud | local
+max_playlist_len = 100              # [live] most songs one playlist link adds, the rest is left out
 
 [sources.tidal]
 quality = "high"                    # [live] low | high | lossless

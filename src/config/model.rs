@@ -230,14 +230,28 @@ pub enum GroupRef {
     Name(String),
 }
 
-#[derive(Deserialize, Serialize, Default, Debug, Clone, PartialEq)]
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
 #[serde(default, deny_unknown_fields)]
 pub struct SourcesConfig {
     /// Source used for search phrases.
     pub default: SourceKind,
+    /// The most tracks one playlist link adds, the rest of the playlist is left out.
+    pub max_playlist_len: NonZeroUsize,
     pub tidal: TidalConfig,
     pub youtube: YoutubeConfig,
     pub local: LocalConfig,
+}
+
+impl Default for SourcesConfig {
+    fn default() -> Self {
+        Self {
+            default: SourceKind::default(),
+            max_playlist_len: NonZeroUsize::new(100).unwrap(),
+            tidal: TidalConfig::default(),
+            youtube: YoutubeConfig::default(),
+            local: LocalConfig::default(),
+        }
+    }
 }
 
 #[derive(Deserialize, Serialize, Default, Debug, Clone, Copy, PartialEq, Eq)]

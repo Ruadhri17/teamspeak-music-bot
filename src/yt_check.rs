@@ -4,6 +4,7 @@
 //! so a broken path shows up even when the other one still plays.
 
 use std::{
+    num::NonZeroUsize,
     path::Path,
     time::{Duration, Instant},
 };
@@ -70,7 +71,22 @@ async fn check_path(
 ) -> anyhow::Result<()> {
     let youtube = config.sources.youtube.clone();
     let start = Instant::now();
-    let track = youtube::resolve_with(&youtube, query, clients).await?;
+    // Only the first video is played, so a playlist is not listed further.
+    let found = youtube::resolve_with(&youtube, query, NonZeroUsize::MIN, clients).await?;
+    if let Some(playlist) = &found.playlist {
+        let total = playlist
+            .total
+            .map_or_else(|| "?".to_owned(), |total| total.to_string());
+        println!(
+            "  list    {:?}, {total} videos, checking the first",
+            playlist.title
+        );
+    }
+    let track = found
+        .tracks
+        .into_iter()
+        .next()
+        .expect("parse_output never returns an empty list");
     let Location::Youtube(id) = track.location else {
         anyhow::bail!("the lookup did not give a YouTube video");
     };
