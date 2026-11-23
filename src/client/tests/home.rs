@@ -77,3 +77,15 @@ fn summon_is_refused_while_the_bot_is_elsewhere() {
     assert_eq!(summon(2, 1, 3, false), Summon::Busy);
     assert_eq!(summon(2, 1, 1, false), Summon::Busy);
 }
+
+#[test]
+fn admin_takes_the_bot_from_any_channel() {
+    assert_eq!(summon(2, 1, 3, true), Summon::Move(3));
+    assert_eq!(summon(2, 1, 1, true), Summon::Move(1));
+    assert_eq!(summon(1, 1, 3, true), Summon::Move(3));
+}
+
+#[test]
+fn admin_in_the_bot_channel_does_nothing() {
+    assert_eq!(summon(2, 1, 2, true), Summon::Stay);
+}

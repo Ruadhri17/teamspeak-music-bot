@@ -87,3 +87,6 @@ pub fn check(command: &Command, role: Role, in_bot_channel: bool) -> Result<(), 
         },
     }
 }
+
+#[cfg(test)]
+mod tests;

@@ -139,6 +139,21 @@ async fn summon_is_passed_to_the_client_with_the_sender() {
 }
 
 #[tokio::test]
+async fn summon_by_an_admin_is_marked() {
+    let mut h = Harness::new();
+    let admin = sender(7, Role::Admin, false);
+    assert_eq!(h.send_as(ReplyTo::Client(7), &admin, "!bot summon"), None);
+    assert_eq!(
+        h.client_requests(),
+        [ClientRequest::Summon {
+            sender_id: 7,
+            reply_to: ReplyTo::Client(7),
+            admin: true,
+        }]
+    );
+}
+
+#[tokio::test]
 async fn unsupported_source_replies_and_keeps_idle() {
     let mut h = Harness::new();
     for source in ["tidal", "spotify", "soundcloud"] {
