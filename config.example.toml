@@ -25,7 +25,7 @@ default_volume = 50                 # [live] 0-100, volume after start (logarith
 max_volume = 100                    # [live] 0-100, highest value allowed for `!bot volume`
 pause_release_after = "5m"          # [live] release the stream after being paused this long
 
-# Events (same as in TS3AudioBot). Every action is optional,
+# Events. Every action is optional,
 # an event without actions does nothing.
 
 [events.on_connect]                 # bot connected to the server
