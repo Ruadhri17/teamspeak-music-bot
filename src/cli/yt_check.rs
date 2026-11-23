@@ -11,7 +11,9 @@ use std::{
 
 use crate::{
     audio::{Decoder, FRAME_DURATION},
-    config::{Config, YoutubeConfig},
+    check_dependencies,
+    config::{Config, ConfigLocation, LogLevel, YoutubeConfig},
+    logging,
     sources::{
         Location, QueryType, parse_query,
         youtube::{self, Clients, VideoId},
@@ -21,7 +23,24 @@ use crate::{
 /// Enough to see that audio flows, short enough to check both paths quickly.
 const SAMPLE_LENGTH: Duration = Duration::from_secs(10);
 
-pub async fn run(config: &Config, query: &str, full: bool) -> anyhow::Result<()> {
+pub async fn run(
+    location: &ConfigLocation,
+    log_level: Option<LogLevel>,
+    query: &str,
+    full: bool,
+) -> anyhow::Result<()> {
+    let config = location.load()?;
+    // `warn` and up by default, so the yt-dlp errors show up between the results.
+    logging::init(log_level.or(Some(LogLevel::Warn)), config.logging.level);
+    let versions = check_dependencies(&config)?;
+    println!("dependencies");
+    for (name, version) in versions {
+        println!("  {name:<7} {version}");
+    }
+    check(&config, query, full).await
+}
+
+async fn check(config: &Config, query: &str, full: bool) -> anyhow::Result<()> {
     let query = parse_query(query.trim());
     println!("\nquery");
     match &query {

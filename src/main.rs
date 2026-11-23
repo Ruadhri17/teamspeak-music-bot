@@ -14,7 +14,6 @@ mod presence;
 mod process;
 mod secrets;
 mod sources;
-mod yt_check;
 
 use std::{
     path::Path,
@@ -42,35 +41,12 @@ async fn main() -> anyhow::Result<()> {
     let location = ConfigLocation::new(cli.config)?;
 
     match cli.command {
-        Command::Init { force } => init(&location, force),
+        Command::Init { force } => cli::init(&location, force),
         Command::Run => run(&location, cli.log_level).await,
         Command::YtCheck { query, full } => {
-            yt_check(&location, cli.log_level, &query.join(" "), full).await
+            cli::yt_check::run(&location, cli.log_level, &query.join(" "), full).await
         }
     }
-}
-
-fn init(location: &ConfigLocation, force: bool) -> anyhow::Result<()> {
-    location.init(force)?;
-    println!("config file created at: {}", location.file_path().display());
-    Ok(())
-}
-
-async fn yt_check(
-    location: &ConfigLocation,
-    log_level: Option<LogLevel>,
-    query: &str,
-    full: bool,
-) -> anyhow::Result<()> {
-    let config = location.load()?;
-    // `warn` and up by default, so the yt-dlp errors show up between the results.
-    logging::init(log_level.or(Some(LogLevel::Warn)), config.logging.level);
-    let versions = check_dependencies(&config)?;
-    println!("dependencies");
-    for (name, version) in versions {
-        println!("  {name:<7} {version}");
-    }
-    yt_check::run(&config, query, full).await
 }
 
 /// An external program the bot runs.

@@ -1,10 +1,18 @@
-//! Command line interface. Doc comments on fields become the `--help` text.
+//! Command line interface: the arguments and the commands that only run in a terminal.
+//! Doc comments on fields become the `--help` text.
+//!
+//! - `mod.rs`: `Cli`, `Command` and `init`
+//! - `yt_check`: `tsmusic yt-check`
+//!
+//! `run` starts the bot itself and stays in `main.rs`.
+
+pub mod yt_check;
 
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
 
-use crate::config::LogLevel;
+use crate::config::{ConfigLocation, LogLevel};
 
 #[derive(Parser, Debug)]
 #[command(name = "tsmusic", version, about = "TeamSpeak music bot")]
@@ -44,6 +52,13 @@ pub enum Command {
         #[arg(long)]
         full: bool,
     },
+}
+
+/// `tsmusic init`: writes the config template.
+pub fn init(location: &ConfigLocation, force: bool) -> anyhow::Result<()> {
+    location.init(force)?;
+    println!("config file created at: {}", location.file_path().display());
+    Ok(())
 }
 
 #[cfg(test)]
