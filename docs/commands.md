@@ -36,7 +36,7 @@ Commands are grouped into three families:
 - **Users** in the **same channel** as the bot.
 - **Admins** from anywhere on the server. Admins can also move the bot out of a channel where it is busy, and they are the only ones who can use `!bot config`.
 
-Who counts as an admin or a user is set in the bot configuration, by TeamSpeak **UID** and/or **server group** (by name or ID). By default everyone is a user. Some roles or people can be **excluded**: they cannot control or summon the bot. Ask your server admin if you are unsure of your role.
+Who counts as an admin is set in the bot configuration by **server group** (by name or ID), by default the `Admin` and `Owner` groups. Members of chosen server groups can be **excluded**: they cannot control or summon the bot. Who may drag the bot to another channel is decided by the server permissions, not by the bot. Ask your server admin if you are unsure of your role.
 
 Commands from other channels are rejected with a short message.
 

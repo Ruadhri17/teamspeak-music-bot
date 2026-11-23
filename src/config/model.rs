@@ -193,30 +193,24 @@ impl Default for QueueConfig {
     }
 }
 
-/// Checked in order: admin -> blocked -> user.
+/// Roles come from server groups. Everyone else in the bot's channel is a user.
+/// Dragging the bot and joining channels are left to the server permissions.
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
 #[serde(default, deny_unknown_fields)]
 pub struct PermissionsConfig {
-    pub admin_uids: Vec<String>,
+    /// May use `!bot config` and summon the bot while it is busy elsewhere.
     pub admin_groups: Vec<GroupRef>,
-    /// Empty `user_*` = everyone is a user.
-    pub user_uids: Vec<String>,
-    pub user_groups: Vec<GroupRef>,
-    pub blocked_uids: Vec<String>,
+    /// May not control or summon the bot. Admin takes precedence.
     pub blocked_groups: Vec<GroupRef>,
 }
 
 impl Default for PermissionsConfig {
     fn default() -> Self {
         Self {
-            admin_uids: Vec::new(),
             admin_groups: vec![
                 GroupRef::Name("Admin".into()),
                 GroupRef::Name("Owner".into()),
             ],
-            user_uids: Vec::new(),
-            user_groups: Vec::new(),
-            blocked_uids: Vec::new(),
             blocked_groups: Vec::new(),
         }
     }

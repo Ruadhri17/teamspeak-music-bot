@@ -59,14 +59,10 @@ delay = "0s"                        # [live]
 show_page_size = 15                 # [live] entries per page in !queue show
 
 [permissions]
-# Checked in order: admin -> blocked -> user.
-# Groups: name (case-insensitive) or ID, e.g. ["Admin", 6].
-admin_uids = []                     # [live]
-admin_groups = ["Admin", "Owner"]   # [live]
-user_uids = []                      # [live] empty user_* = everyone is a user
-user_groups = []                    # [live]
-blocked_uids = []                   # [live] cannot control or summon the bot
-blocked_groups = []                 # [live] e.g. ["Guest"], admin takes precedence
+# Server groups by name (case-insensitive) or ID, e.g. ["Admin", 6].
+# Everyone in the bot's channel controls it. Who may drag the bot is set on the server.
+admin_groups = ["Admin", "Owner"]   # [live] !bot config, summon while the bot is busy elsewhere
+blocked_groups = []                 # [live] e.g. ["No Bot"], cannot control or summon, admin takes precedence
 
 [sources]
 default = "youtube"                 # [live] tidal | spotify | youtube | soundcloud | local
