@@ -190,10 +190,15 @@ async fn run(location: &ConfigLocation, log_level: Option<LogLevel>) -> anyhow::
         _ = sigint.recv() => info!("SIGINT received, shutting down"),
         _ = sigterm.recv() => info!("SIGTERM received, shutting down"),
         result = &mut client => return Ok(result??),
-        // While the client runs, the player only ends by panicking, which would leave
-        // the bot connected but deaf. Exiting with an error lets systemd restart it.
         result = &mut player => {
             result?;
+            // A failed client closes the events channel, which stops the player too, and
+            // this branch may win the race. The client's error is the one that explains it.
+            if let Ok(client) = tokio::time::timeout(Duration::from_secs(1), &mut client).await {
+                return Ok(client??);
+            }
+            // Otherwise the player panicked while the client runs, which would leave the bot
+            // connected but deaf. Exiting with an error lets systemd restart it.
             anyhow::bail!("player stopped while the client was still running");
         }
     }
