@@ -3,16 +3,19 @@
 //! - `TrackRef`: a song in the queue, resolved on `!song add` and opened right before playing
 //! - TODO: common `Source` interface: resolve a link, search (track/album/playlist), open a stream
 //! - `parse_query`: link or search phrase, links checked against each source allow-list of hosts
+//! - `music_dir`: the folder of the local source, used for lookups and for opening tracks
 
 pub mod local;
 mod soundcloud;
 mod spotify;
 pub mod youtube;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use url::Url;
 use youtube::VideoId;
+
+use crate::config::SourcesConfig;
 
 /// A song in the queue or playing. Holds no open file or stream.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -94,6 +97,16 @@ pub fn parse_query(query: &str) -> QueryType {
         Some(url) => QueryType::Link(url),
         None => QueryType::Phrase(query.to_owned()),
     }
+}
+
+/// The folder of the local source. `None` in the config means the source is disabled,
+/// the error is safe to show on the chat.
+pub fn music_dir(sources: &SourcesConfig) -> Result<&Path, String> {
+    sources
+        .local
+        .music_dir
+        .as_deref()
+        .ok_or_else(|| "the local source is disabled".to_string())
 }
 
 /// Hosts accepted in a link typed without `https://`.

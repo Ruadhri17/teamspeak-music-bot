@@ -1,7 +1,8 @@
 //! Entry point: CLI (`init`, `run`, `yt-check`), loading config and secrets,
-//! starting the tasks (TS client, player, presence) and wiring them with channels.
+//! starting the two tasks (the TeamSpeak client and the bot) and wiring them with channels.
 
 mod audio;
+mod bot;
 mod chat;
 mod cli;
 mod commands;
@@ -23,9 +24,10 @@ use std::{
 
 use clap::Parser;
 
+use bot::Bot;
 use cli::{Cli, Command};
 use config::{Config, ConfigLocation, LogLevel};
-use player::{AudioLauncher, Player};
+use player::AudioLauncher;
 use secrets::Secrets;
 use teamspeak::{AudioControl, Client};
 use tokio::{
@@ -158,24 +160,24 @@ async fn run(location: &ConfigLocation, log_level: Option<LogLevel>) -> anyhow::
     )?;
     let mut client = tokio::spawn(client.run());
     let launcher = Box::new(AudioLauncher::new(&config, frames_tx));
-    let player = Player::new(events_rx, requests_tx, control_tx, launcher, &config);
+    let bot = Bot::new(events_rx, requests_tx, control_tx, launcher, &config);
     // Stops by itself once the client exits and the events channel closes.
-    let mut player = tokio::spawn(player.run());
+    let mut bot = tokio::spawn(bot.run());
 
     tokio::select! {
         _ = sigint.recv() => info!("SIGINT received, shutting down"),
         _ = sigterm.recv() => info!("SIGTERM received, shutting down"),
         result = &mut client => return Ok(result??),
-        result = &mut player => {
+        result = &mut bot => {
             result?;
-            // A failed client closes the events channel, which stops the player too, and
+            // A failed client closes the events channel, which stops the bot too, and
             // this branch may win the race. The client's error is the one that explains it.
             if let Ok(client) = tokio::time::timeout(Duration::from_secs(1), &mut client).await {
                 return Ok(client??);
             }
-            // Otherwise the player panicked while the client runs, which would leave the bot
+            // Otherwise the bot panicked while the client runs, which would leave it
             // connected but deaf. Exiting with an error lets systemd restart it.
-            anyhow::bail!("player stopped while the client was still running");
+            anyhow::bail!("the bot stopped while the TeamSpeak client was still running");
         }
     }
 

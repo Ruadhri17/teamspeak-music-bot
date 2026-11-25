@@ -3,7 +3,7 @@ use std::{fs, io, path::Path};
 use super::harness::{Harness, on_channel};
 use crate::{
     audio::{AudioError, AudioInput, Decoder},
-    player::{song::chat_reason, state::Ended},
+    player::{Ended, chat_reason},
     sources::youtube::YoutubeError,
 };
 
@@ -33,7 +33,7 @@ async fn failure_of_an_old_track_sends_nothing() {
     h.add(&["a.mp3", "b.mp3"]).await;
     let old = h.current_id();
     assert_eq!(h.send("!song next"), None);
-    h.player.finished(Ended {
+    h.bot.finished(Ended {
         id: old,
         failure: Some("playback failed".to_owned()),
     });

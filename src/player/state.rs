@@ -1,23 +1,19 @@
 //! Player state and playback IDs.
 
-use tokio::task::Id;
 use tokio_util::sync::CancellationToken;
 
-use crate::{
-    sources::{Found, TrackRef},
-    teamspeak::ReplyTo,
-};
+use crate::sources::TrackRef;
 
 /// Identifies one playback, so a late "finished" from an old track can be told apart.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) struct PlaybackId(pub(super) u64);
+pub(crate) struct PlaybackId(pub(crate) u64);
 
 /// Sent from the audio thread when a track ends.
 #[derive(Debug)]
-pub(super) struct Ended {
-    pub(super) id: PlaybackId,
+pub(crate) struct Ended {
+    pub(crate) id: PlaybackId,
     /// `Some` when the track failed, with a reason that is safe to show on the chat.
-    pub(super) failure: Option<String>,
+    pub(crate) failure: Option<String>,
 }
 
 /// The current track with everything needed to stop it.
@@ -46,15 +42,4 @@ impl State {
             State::Playing(playback) | State::Paused(playback) => Some(playback),
         }
     }
-}
-
-/// A `!song add` whose lookup runs in `Player::lookups`, kept in the order of the commands.
-#[derive(Debug)]
-pub(super) struct Pending {
-    /// The lookup task, matched with the ID that `join_next_with_id` returns.
-    pub(super) task: Id,
-    /// Where an error goes, the place the command came from.
-    pub(super) reply_to: ReplyTo,
-    /// `None` while the lookup runs.
-    pub(super) result: Option<Result<Found, String>>,
 }

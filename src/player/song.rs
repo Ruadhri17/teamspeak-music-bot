@@ -1,104 +1,48 @@
-//! `!song ...` commands and the playback transitions shared with `queue`:
-//! starting, stopping and finishing tracks.
+//! The playback transitions shared by the song and queue operations: queueing, starting,
+//! pausing, stopping and finishing tracks, and the volume.
 
 use std::mem;
 
-use tokio::task::{Id, JoinError};
 use tokio_util::sync::CancellationToken;
 use tracing::warn;
 
 use super::{
-    Player,
-    state::{Ended, Pending, Playback, PlaybackId, State},
+    Enqueued, Notice, Player, PlayerError,
+    state::{Ended, Playback, PlaybackId, State},
 };
 use crate::{
     audio::{AudioError, AudioInput},
-    chat,
-    config::{SourceKind, SourcesConfig, Volume},
+    config::Volume,
     sources::{
-        Found, Location, QueryType, TrackRef, local,
+        Location, TrackRef, local, music_dir,
         youtube::{self, YoutubeError},
     },
-    teamspeak::ReplyTo,
 };
 
 impl Player {
-    /// `!song add`. Starts the lookup, `lookup_done` queues the track in the order of the commands.
-    pub(super) fn add(&mut self, query: QueryType, source: Option<SourceKind>, reply_to: ReplyTo) {
-        let sources = self.sources.clone();
-        let task = self.lookups.spawn(resolve(sources, query, source)).id();
-        self.pending.push_back(Pending {
-            task,
-            reply_to,
-            result: None,
-        });
-    }
-
-    /// Stores the result of a lookup, then queues every finished lookup at the front of
-    /// `pending`. A track starts when nothing plays, a paused track stays paused.
-    /// Errors and the summary of a playlist go to the place the command came from.
-    pub(super) fn lookup_done(&mut self, joined: Result<(Id, Result<Found, String>), JoinError>) {
-        let (task, result) = match joined {
-            Ok(done) => done,
-            // Aborted by `!queue clear`, which also removed the entry.
-            Err(err) if err.is_cancelled() => return,
-            Err(err) => {
-                warn!("lookup task panicked: {err}");
-                (err.id(), Err("the lookup failed".to_string()))
-            }
-        };
-        if let Some(entry) = self.pending.iter_mut().find(|entry| entry.task == task) {
-            entry.result = Some(result);
-        }
-
-        while let Some(entry) = self.pending.pop_front_if(|entry| entry.result.is_some()) {
-            let found = match entry.result.expect("only finished entries are taken") {
-                Ok(found) => found,
-                Err(text) => {
-                    self.say(entry.reply_to, text);
-                    continue;
-                }
-            };
-            if let Some(text) = self.enqueue_found(found) {
-                self.say(entry.reply_to, text);
-            }
-        }
-    }
-
-    /// Queues the tracks until the queue is full. Returns the message for the sender:
-    /// a full queue, or the summary of a playlist. A single track that fits is silent.
-    fn enqueue_found(&mut self, Found { tracks, playlist }: Found) -> Option<String> {
-        let count = tracks.len();
+    /// Queues the tracks until the queue is full. A track starts when nothing plays,
+    /// a paused track stays paused.
+    pub fn enqueue(&mut self, tracks: Vec<TrackRef>) -> Enqueued {
         let mut added = 0;
-        let mut full = None;
         for track in tracks {
-            if let Err(err) = self.queue.push(track) {
-                full = Some(err);
-                break;
+            if let Err(full) = self.queue.push(track) {
+                return Enqueued {
+                    added,
+                    full: Some(full),
+                };
             }
             added += 1;
+            // Started one by one, so the first track leaves the queue before the next ones
+            // are counted against its limit.
             if let State::Idle = self.state {
                 self.play_next();
             }
         }
-
-        let total = playlist
-            .as_ref()
-            .and_then(|playlist| playlist.total)
-            .map_or(count, |total| total.max(count));
-        let summary = || match &playlist {
-            Some(playlist) => added_from(added, total, &playlist.title),
-            None => format!("added {added} of {total} songs"),
-        };
-        match full {
-            Some(full) if added == 0 => Some(full.to_string()),
-            Some(full) => Some(format!("{full}, {}", summary())),
-            None => playlist.is_some().then(summary),
-        }
+        Enqueued { added, full: None }
     }
 
-    /// `!song pause`. Pauses a playing track, otherwise does nothing.
-    pub(super) fn pause(&mut self) {
+    /// Pauses a playing track, otherwise does nothing.
+    pub fn pause(&mut self) {
         self.state = match mem::take(&mut self.state) {
             State::Playing(playback) => {
                 self.control.send_modify(|control| control.paused = true);
@@ -108,16 +52,14 @@ impl Player {
         };
     }
 
-    /// `!song resume`. Resumes a paused track, or starts the queue when idle.
+    /// Resumes a paused track, or starts the queue when idle.
     /// Unpauses the client even when idle, a track that finished while paused
     /// may still have frames in the buffer.
-    pub(super) fn resume(&mut self) -> Result<(), String> {
+    pub fn resume(&mut self) -> Result<(), PlayerError> {
         self.control.send_modify(|control| control.paused = false);
         self.state = match mem::take(&mut self.state) {
             State::Paused(playback) => State::Playing(playback),
-            State::Idle if self.queue.is_empty() => {
-                return Err("the queue is empty".to_string());
-            }
+            State::Idle if self.queue.is_empty() => return Err(PlayerError::QueueEmpty),
             State::Idle => {
                 self.play_next();
                 return Ok(());
@@ -127,22 +69,10 @@ impl Player {
         Ok(())
     }
 
-    /// `!song next`. Starts the next track, or stops playback when the queue is empty.
-    pub(super) fn next(&mut self) {
+    /// Starts the next track, or stops playback when the queue is empty.
+    pub fn next(&mut self) {
         self.stop_current();
         self.play_next();
-    }
-
-    /// `!song current`. Always replies (informational command).
-    // TODO: artist, source and position in time, once sources give that.
-    pub(super) fn current(&self) -> String {
-        match &self.state {
-            State::Idle => "nothing is playing".to_string(),
-            State::Playing(playback) => chat::escape(&playback.track.title).into_owned(),
-            State::Paused(playback) => {
-                format!("{} (paused)", chat::escape(&playback.track.title))
-            }
-        }
     }
 
     /// Stops the current track at once, drops its buffered frames and unpauses the client.
@@ -161,13 +91,15 @@ impl Player {
     }
 
     /// A track finished decoding, its end may still be in the buffer.
-    /// Stale IDs are ignored. A failure of the current track goes to the channel.
-    pub(super) fn finished(&mut self, Ended { id, failure }: Ended) {
+    /// Stale IDs are ignored. A failure of the current track becomes a notice.
+    pub fn finished(&mut self, Ended { id, failure }: Ended) {
         if let (Some(playback), Some(reason)) = (self.state.playback(), failure)
             && playback.id == id
         {
-            let text = could_not_play(&playback.track.title, &reason);
-            self.say(ReplyTo::Channel, text);
+            self.notices.push(Notice::CouldNotPlay {
+                title: playback.track.title.clone(),
+                reason,
+            });
         }
         match &self.state {
             // `stop_current` is not used, the buffered end must play before the next track.
@@ -175,7 +107,7 @@ impl Player {
                 self.state = State::Idle;
                 self.play_next();
             }
-            // Advancing would cancel the pause, playback continues on `!song resume`.
+            // Advancing would cancel the pause, playback continues on `resume`.
             State::Paused(playback) if playback.id == id => self.state = State::Idle,
             _ => {}
         }
@@ -190,9 +122,12 @@ impl Player {
                     self.start(input, track);
                     return;
                 }
-                Err(err) => {
-                    warn!("skipping {}: {err}", track.title);
-                    self.say(ReplyTo::Channel, could_not_play(&track.title, &err));
+                Err(reason) => {
+                    warn!("skipping {}: {reason}", track.title);
+                    self.notices.push(Notice::CouldNotPlay {
+                        title: track.title,
+                        reason,
+                    });
                 }
             }
         }
@@ -224,20 +159,20 @@ impl Player {
     }
 
     /// The volume the client applies right now.
-    pub(super) fn volume(&self) -> Volume {
+    pub fn volume(&self) -> Volume {
         self.control.borrow().volume
     }
 
-    /// `!bot volume <n>`. Heard in the next frame, the client applies it right before sending.
-    pub(super) fn set_volume(&mut self, volume: Volume) -> Result<(), String> {
+    /// Heard in the next frame, the client applies it right before sending.
+    pub fn set_volume(&mut self, volume: Volume) -> Result<(), PlayerError> {
         if volume > self.max_volume {
-            return Err(format!("the highest volume is {}", self.max_volume.get()));
+            return Err(PlayerError::VolumeTooHigh(self.max_volume.get()));
         }
         self.control.send_modify(|control| control.volume = volume);
         Ok(())
     }
 
-    /// Opens a track right before playing it.
+    /// Opens a track right before playing it. `Err` is safe to show on the chat.
     fn open(&self, location: &Location) -> Result<AudioInput, String> {
         match location {
             Location::Local(path) => {
@@ -257,59 +192,9 @@ impl Player {
     }
 }
 
-/// Turns a query into a track with the chosen source, or the default one from the config.
-async fn resolve(
-    sources: SourcesConfig,
-    query: QueryType,
-    source: Option<SourceKind>,
-) -> Result<Found, String> {
-    match source.unwrap_or(sources.default) {
-        SourceKind::Tidal | SourceKind::Spotify | SourceKind::Soundcloud => {
-            Err("this source is not supported yet".to_string())
-        }
-        SourceKind::Youtube => youtube::resolve(&sources.youtube, &query, sources.max_playlist_len)
-            .await
-            .map_err(|err| err.to_string()),
-        SourceKind::Local => match query {
-            QueryType::Phrase(path) => {
-                let track =
-                    local::resolve(music_dir(&sources)?, &path).map_err(|err| err.to_string())?;
-                Ok(Found::track(track))
-            }
-            QueryType::Link(_) => Err("the local source takes a path, not a link".to_string()),
-        },
-    }
-}
-
-/// `None` in the config means the local source is disabled.
-fn music_dir(sources: &SourcesConfig) -> Result<&std::path::Path, String> {
-    sources
-        .local
-        .music_dir
-        .as_deref()
-        .ok_or_else(|| "the local source is disabled".to_string())
-}
-
-/// `added 3 songs from X`, or `added 100 of 182 songs from X` when part of the playlist
-/// was left out. The title comes from outside the bot, so it is escaped.
-fn added_from(added: usize, total: usize, title: &str) -> String {
-    let songs = if total == 1 { "song" } else { "songs" };
-    let title = chat::escape(title);
-    if added < total {
-        format!("added {added} of {total} {songs} from {title}")
-    } else {
-        format!("added {added} {songs} from {title}")
-    }
-}
-
-/// The title comes from outside the bot, so it is escaped.
-fn could_not_play(title: &str, reason: &str) -> String {
-    format!("could not play {}: {reason}", chat::escape(title))
-}
-
 /// `AudioError` carries ffmpeg output and paths, so only the known messages of the sources
 /// reach the chat (e.g. "this video is age-restricted"), anything else is generic.
-pub(super) fn chat_reason(err: &AudioError) -> String {
+pub(crate) fn chat_reason(err: &AudioError) -> String {
     if let AudioError::Input(err) = err
         && let Some(err) = err
             .get_ref()

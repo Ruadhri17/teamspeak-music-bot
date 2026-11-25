@@ -1,7 +1,7 @@
 use std::fs;
 
 use super::harness::{Harness, on_channel};
-use crate::player::state::Ended;
+use crate::player::Ended;
 
 #[tokio::test]
 async fn add_when_idle_starts_playing() {
@@ -67,7 +67,7 @@ async fn stale_finished_is_ignored() {
     h.add(&["a.mp3", "b.mp3", "c.mp3"]).await;
     let old = h.current_id();
     h.send("!song next");
-    h.player.finished(Ended {
+    h.bot.finished(Ended {
         id: old,
         failure: None,
     });

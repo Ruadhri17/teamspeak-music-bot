@@ -6,12 +6,10 @@ use tokio_util::sync::CancellationToken;
 
 use crate::{
     audio::{AudioInput, PlayResult},
+    bot::Bot,
     config::{Config, SourceKind},
     permissions::Role,
-    player::{
-        Launcher, Player,
-        state::{Ended, PlaybackId, State},
-    },
+    player::{Ended, Launcher, PlaybackId},
     teamspeak::{AudioControl, Author, ReplyTo, TeamspeakEvent, TeamspeakRequest},
 };
 
@@ -29,12 +27,12 @@ impl Launcher for FakeLauncher {
 }
 
 pub struct Harness {
-    pub player: Player,
+    pub bot: Bot,
     pub dir: TempDir,
     pub scripts: Option<TempDir>,
     control: watch::Receiver<AudioControl>,
-    _events: mpsc::Sender<TeamspeakEvent>,
-    _requests: mpsc::Receiver<TeamspeakRequest>,
+    _teamspeak_events: mpsc::Sender<TeamspeakEvent>,
+    _teamspeak_requests: mpsc::Receiver<TeamspeakRequest>,
 }
 
 impl Harness {
@@ -89,7 +87,7 @@ impl Harness {
         let (events_tx, events_rx) = mpsc::channel(8);
         let (requests_tx, requests_rx) = mpsc::channel(8);
         let (control_tx, control_rx) = watch::channel(AudioControl::default());
-        let player = Player::new(
+        let bot = Bot::new(
             events_rx,
             requests_tx,
             control_tx,
@@ -98,12 +96,12 @@ impl Harness {
         );
 
         Self {
-            player,
+            bot,
             dir,
             scripts: None,
             control: control_rx,
-            _events: events_tx,
-            _requests: requests_rx,
+            _teamspeak_events: events_tx,
+            _teamspeak_requests: requests_rx,
         }
     }
 
@@ -120,12 +118,12 @@ impl Harness {
     }
 
     pub fn send_as(&mut self, reply_to: ReplyTo, author: &Author, text: &str) -> Option<String> {
-        self.player.command(text, reply_to, author)
+        self.bot.command(text, reply_to, author)
     }
 
     pub async fn next_lookup(&mut self) {
-        let joined = self.player.lookups.join_next_with_id().await.unwrap();
-        self.player.lookup_done(joined);
+        let joined = self.bot.lookups.join_next_with_id().await.unwrap();
+        self.bot.lookup_done(joined);
     }
 
     pub async fn add(&mut self, names: &[&str]) {
@@ -142,45 +140,39 @@ impl Harness {
     }
 
     pub async fn settle(&mut self) {
-        while let Some(joined) = self.player.lookups.join_next_with_id().await {
-            self.player.lookup_done(joined);
+        while let Some(joined) = self.bot.lookups.join_next_with_id().await {
+            self.bot.lookup_done(joined);
         }
     }
 
     pub fn playing(&self) -> Option<&str> {
-        match &self.player.state {
-            State::Playing(playback) => Some(&playback.track.title),
-            _ => None,
-        }
+        self.bot.player.playing()
     }
 
     pub fn paused(&self) -> Option<&str> {
-        match &self.player.state {
-            State::Paused(playback) => Some(&playback.track.title),
-            _ => None,
-        }
+        self.bot.player.paused()
     }
 
     pub fn is_idle(&self) -> bool {
-        matches!(self.player.state, State::Idle)
+        self.bot.player.is_idle()
     }
 
     pub fn current_id(&self) -> PlaybackId {
-        self.player.state.playback().unwrap().id
+        self.bot.player.current_id()
     }
 
     pub fn current_stop(&self) -> CancellationToken {
-        self.player.state.playback().unwrap().stop.clone()
+        self.bot.player.current_stop()
     }
 
     pub fn finish_current(&mut self) {
         let id = self.current_id();
-        self.player.finished(Ended { id, failure: None });
+        self.bot.finished(Ended { id, failure: None });
     }
 
     pub fn fail_current(&mut self, reason: &str) {
         let id = self.current_id();
-        self.player.finished(Ended {
+        self.bot.finished(Ended {
             id,
             failure: Some(reason.to_owned()),
         });
@@ -197,7 +189,7 @@ impl Harness {
     }
 
     pub fn teamspeak_requests(&mut self) -> Vec<TeamspeakRequest> {
-        std::mem::take(&mut self.player.outbox)
+        std::mem::take(&mut self.bot.outbox)
     }
 
     pub fn control(&self) -> AudioControl {
@@ -205,15 +197,7 @@ impl Harness {
     }
 
     pub fn queued(&self) -> Vec<String> {
-        let size = NonZeroUsize::new(1000).unwrap();
-        self.player
-            .queue
-            .page(NonZeroUsize::MIN, size)
-            .unwrap()
-            .entries
-            .into_iter()
-            .map(|(_, track)| track.title.clone())
-            .collect()
+        self.bot.player.queued()
     }
 }
 

@@ -1,14 +1,13 @@
-//! Player: the actor that owns the playback state and the queue.
+//! Player: plays tracks and keeps the queue. Knows nothing about the chat or TeamSpeak,
+//! the bot calls its methods and turns the results into replies.
 //!
 //! Every playback has a `PlaybackId` and a `CancellationToken`. Results with a stale ID are dropped.
-//! Handles `!song ...` and `!queue ...` commands.
 //!
-//! Split like `commands`, one file per command namespace:
-//! - `mod.rs`: the actor loop, dispatching commands and chat replies
+//! - `mod.rs`: `Player`, its errors and what it reports
 //! - `launcher`: `Launcher`, the interface to the audio thread
 //! - `state`: `State` and `PlaybackId`
-//! - `song`: `!song ...` and the playback transitions (start, stop, finish)
-//! - `queue`: `!queue ...` and the song queue as a plain data structure
+//! - `song`: the playback transitions (start, pause, next, finish) and the volume
+//! - `queue`: the song queue as a plain data structure and the queue operations
 
 mod launcher;
 mod queue;
@@ -16,61 +15,82 @@ mod song;
 mod state;
 
 pub use launcher::{AudioLauncher, Launcher};
+pub(crate) use queue::QueueFull;
+pub(crate) use state::Ended;
+#[cfg(test)]
+pub(crate) use {song::chat_reason, state::PlaybackId};
 
-use std::{collections::VecDeque, num::NonZeroUsize};
+use std::{num::NonZeroUsize, sync::Arc};
 
-use tokio::{
-    sync::{mpsc, watch},
-    task::JoinSet,
-};
-use tracing::debug;
+use tokio::sync::{mpsc, watch};
 
 use crate::{
-    commands::Command,
     config::{Config, SourcesConfig, Volume},
-    permissions::{self, Role},
-    sources::Found,
-    teamspeak::{AudioControl, Author, ReplyTo, TeamspeakEvent, TeamspeakRequest},
+    sources::TrackRef,
+    teamspeak::AudioControl,
 };
 use queue::Queue;
-use state::{Ended, Pending, State};
+use state::State;
+
+/// A refused request, the text is meant for the chat.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum PlayerError {
+    #[error("the queue is empty")]
+    QueueEmpty,
+    #[error("no song at position {0} in the queue")]
+    NoSuchPosition(NonZeroUsize),
+    #[error("the highest volume is {0}")]
+    VolumeTooHigh(u8),
+}
+
+/// Something that happened during playback that the bot should know about.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Notice {
+    /// A track failed to open or to play. `reason` is safe to show on the chat.
+    CouldNotPlay { title: String, reason: String },
+}
+
+/// The result of `Player::enqueue`.
+#[derive(Debug)]
+pub struct Enqueued {
+    pub added: usize,
+    /// Set when the queue filled up before all tracks were added.
+    pub full: Option<QueueFull>,
+}
+
+/// The track that plays now, for `!song current` and `!queue show`.
+#[derive(Debug, Clone, Copy)]
+pub struct Current<'a> {
+    pub track: &'a TrackRef,
+    pub paused: bool,
+}
 
 pub struct Player {
     state: State,
     /// Songs after the current one.
     queue: Queue,
-    /// Entries per page in `!queue show`.
-    page_size: NonZeroUsize,
     /// The ID for the next playback, only ever goes up.
     next_id: u64,
-    /// Lookups started by `!song add`, matched to `pending` by task ID.
-    lookups: JoinSet<Result<Found, String>>,
-    /// The lookups in the order of the commands, a finished one waits for those before it.
-    pending: VecDeque<Pending>,
-    /// Chat messages from the client, the source of commands.
-    events: mpsc::Receiver<TeamspeakEvent>,
-    /// Error replies to the chat.
-    requests: mpsc::Sender<TeamspeakRequest>,
     /// Starts the audio of a track, `AudioLauncher` outside of tests.
     launcher: Box<dyn Launcher>,
-    /// Tells the client to hold the frames (pause) or drop a stopped track's frames.
+    /// Tells the TeamSpeak client to hold the frames (pause) or drop a stopped track's frames.
     control: watch::Sender<AudioControl>,
     /// Audio threads report here when the track ends.
     done_tx: mpsc::Sender<Ended>,
     done_rx: mpsc::Receiver<Ended>,
-    /// Messages that are not direct replies to a command, sent after the current event is handled.
-    outbox: Vec<TeamspeakRequest>,
-    sources: SourcesConfig,
-    /// `!bot volume` above this is refused.
+    /// What happened since the bot last took them, in order.
+    notices: Vec<Notice>,
+    /// For opening a track right before it plays. Shared with the bot's lookups.
+    sources: Arc<SourcesConfig>,
+    /// `set_volume` above this is refused.
     max_volume: Volume,
 }
 
 impl Player {
     pub fn new(
-        events: mpsc::Receiver<TeamspeakEvent>,
-        requests: mpsc::Sender<TeamspeakRequest>,
         control: watch::Sender<AudioControl>,
         launcher: Box<dyn Launcher>,
+        sources: Arc<SourcesConfig>,
         config: &Config,
     ) -> Self {
         let (done_tx, done_rx) = mpsc::channel(8);
@@ -79,124 +99,86 @@ impl Player {
         Self {
             state: State::Idle,
             queue: Queue::new(config.queue.max_len),
-            page_size: config.queue.show_page_size,
             next_id: 0,
-            lookups: JoinSet::new(),
-            pending: VecDeque::new(),
-            events,
-            requests,
             launcher,
             control,
             done_tx,
             done_rx,
-            outbox: Vec::new(),
-            sources: config.sources.clone(),
+            notices: Vec::new(),
+            sources,
             max_volume: config.audio.max_volume,
         }
     }
 
-    pub async fn run(mut self) {
-        loop {
-            tokio::select! {
-                event = self.events.recv() => match event {
-                    Some(event) => self.handle_event(event).await,
-                    None => break, // client is gone
-                },
-                Some(ended) = self.done_rx.recv() => self.finished(ended),
-                Some(joined) = self.lookups.join_next_with_id() => self.lookup_done(joined),
-            }
-            self.send_outbox().await;
+    /// The next track that ended, for the bot's `select!`. Pass it to `finished`.
+    /// Never ends, the player keeps a sender itself.
+    pub async fn ended(&mut self) -> Ended {
+        self.done_rx
+            .recv()
+            .await
+            .expect("the player keeps a sender, the channel cannot close")
+    }
+
+    /// What happened since the last call, in order.
+    pub fn take_notices(&mut self) -> Vec<Notice> {
+        std::mem::take(&mut self.notices)
+    }
+
+    /// The current track, `None` while idle.
+    pub fn current(&self) -> Option<Current<'_>> {
+        match &self.state {
+            State::Idle => None,
+            State::Playing(playback) => Some(Current {
+                track: &playback.track,
+                paused: false,
+            }),
+            State::Paused(playback) => Some(Current {
+                track: &playback.track,
+                paused: true,
+            }),
+        }
+    }
+}
+
+/// For the bot's tests, which check the state through the player.
+#[cfg(test)]
+impl Player {
+    pub(crate) fn playing(&self) -> Option<&str> {
+        match &self.state {
+            State::Playing(playback) => Some(&playback.track.title),
+            _ => None,
         }
     }
 
-    /// Sends the outbox to the client, in order.
-    async fn send_outbox(&mut self) {
-        for request in std::mem::take(&mut self.outbox) {
-            // `Err` means the client has stopped, the request is dropped.
-            let _ = self.requests.send(request).await;
+    pub(crate) fn paused(&self) -> Option<&str> {
+        match &self.state {
+            State::Paused(playback) => Some(&playback.track.title),
+            _ => None,
         }
     }
 
-    /// Queues a chat message for `send_outbox`.
-    fn say(&mut self, to: ReplyTo, text: String) {
-        self.outbox.push(TeamspeakRequest::SendMessage { to, text });
+    /// Nothing plays and nothing is paused.
+    pub(crate) fn is_idle(&self) -> bool {
+        matches!(self.state, State::Idle)
     }
 
-    async fn handle_event(&mut self, event: TeamspeakEvent) {
-        let TeamspeakEvent::Message {
-            reply_to,
-            author,
-            text,
-        } = event;
-        if let Some(text) = self.command(&text, reply_to, &author) {
-            self.reply(reply_to, text).await;
-        }
+    pub(crate) fn current_id(&self) -> PlaybackId {
+        self.state.playback().expect("a track plays").id
     }
 
-    /// Parses a chat message, checks the author's permissions and runs the command.
-    /// Returns the chat reply, `None` for text that is not a command.
-    fn command(&mut self, text: &str, reply_to: ReplyTo, author: &Author) -> Option<String> {
-        let command = match Command::parse(text)? {
-            Ok(command) => command,
-            Err(err) => return Some(err.to_string()),
-        };
-        if let Err(denied) = permissions::check(&command, author.role, author.in_bot_channel) {
-            debug!("command from {} refused: {denied}", author.name);
-            return Some(denied.to_string());
-        }
-        self.execute(command, reply_to, author)
+    pub(crate) fn current_stop(&self) -> tokio_util::sync::CancellationToken {
+        self.state.playback().expect("a track plays").stop.clone()
     }
 
-    /// Runs a command and returns the chat reply, if any.
-    /// Success is silent, except for informational commands.
-    fn execute(&mut self, command: Command, reply_to: ReplyTo, author: &Author) -> Option<String> {
-        match command {
-            Command::Add { query, source, .. } => {
-                self.add(query, source, reply_to);
-                None
-            }
-            Command::Pause => {
-                self.pause();
-                None
-            }
-            Command::Resume => self.resume().err(),
-            Command::Next => {
-                self.next();
-                None
-            }
-            Command::Current => Some(self.current()),
-            Command::Volume(None) => Some(format!("volume: {}", self.volume().get())),
-            Command::Volume(Some(volume)) => self.set_volume(volume).err(),
-            Command::QueueShow { page } => Some(self.queue_show(page)),
-            Command::QueueRemove { position } => self.queue_remove(position).err(),
-            Command::QueueClear => {
-                self.queue_clear();
-                None
-            }
-            Command::Ping => Some("pong".to_string()),
-            Command::Help(text) => Some(text.to_string()),
-            // The client knows the channels, it decides and answers.
-            Command::Summon => {
-                self.outbox.push(TeamspeakRequest::Summon {
-                    sender_id: author.id,
-                    reply_to,
-                    admin: author.role == Role::Admin,
-                });
-                None
-            }
-            // Listed one by one, so a new command does not compile until it is handled.
-            // TODO: `!bot config` belongs to the config handler.
-            Command::ConfigList { .. }
-            | Command::ConfigGet { .. }
-            | Command::ConfigSet { .. }
-            | Command::ConfigReload => None,
-        }
-    }
-
-    async fn reply(&self, to: ReplyTo, text: String) {
-        let request = TeamspeakRequest::SendMessage { to, text };
-        // `Err` means the client has stopped, the reply is dropped.
-        let _ = self.requests.send(request).await;
+    pub(crate) fn queued(&self) -> Vec<String> {
+        let all = NonZeroUsize::new(usize::MAX).expect("not zero");
+        self.queue
+            .page(NonZeroUsize::MIN, all)
+            .expect("the first page always exists")
+            .entries
+            .into_iter()
+            .map(|(_, track)| track.title.clone())
+            .collect()
     }
 }
 

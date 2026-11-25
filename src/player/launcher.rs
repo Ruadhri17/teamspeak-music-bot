@@ -12,8 +12,7 @@ use crate::{
 };
 
 /// Starts the playback of one track.
-/// `Sync` because the spawned player holds `&self` across `.await` in `reply`.
-pub trait Launcher: Send + Sync {
+pub trait Launcher: Send {
     /// `on_done` is boxed because methods called through `dyn Launcher` cannot be generic.
     fn launch(
         &mut self,
