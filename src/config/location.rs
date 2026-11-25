@@ -137,41 +137,10 @@ impl ConfigLocation {
         }
     }
 
-    /// Writes `contents` to a temp file next to the config file, then renames it over the file.
-    pub(super) fn write_atomic(&self, contents: &str) -> ConfigResult<()> {
-        let temp_path = self.file_path.with_extension("toml.tmp");
-        let mut temp = fs::OpenOptions::new()
-            .create(true)
-            .truncate(true)
-            .write(true)
-            .open(&temp_path)
-            .map_err(|source| ConfigError::Write {
-                path: temp_path.clone(),
-                source,
-            })?;
-
-        temp.write_all(contents.as_bytes())
-            .map_err(|source| ConfigError::Write {
-                path: temp_path.clone(),
-                source,
-            })?;
-
-        temp.sync_all().map_err(|source| ConfigError::Write {
-            path: temp_path.clone(),
-            source,
-        })?;
-
-        fs::rename(&temp_path, &self.file_path).map_err(|source| ConfigError::Write {
-            path: temp_path,
-            source,
-        })?;
-
-        Ok(())
-    }
-
     // TODO:
     // - `set(&self, key, value)`: read the file from disk, change one key with `toml_edit`,
-    //   validate the whole config, `write_atomic`.
+    //   validate the whole config, write it atomically with the helper of `secrets::file`
+    //   generalised for the file mode (one atomic write in the bot, not two).
     // - `reload(&self, current)` (SIGHUP, `!bot config reload`): `load` + diff against `current`,
     //   keep the old config on error.
 }

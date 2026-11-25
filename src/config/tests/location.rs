@@ -26,15 +26,6 @@ fn read(location: &ConfigLocation) -> String {
     fs::read_to_string(location.file_path()).expect("read config")
 }
 
-fn files_in(dir: &Path) -> Vec<String> {
-    let mut names: Vec<String> = fs::read_dir(dir)
-        .expect("read dir")
-        .map(|entry| entry.unwrap().file_name().into_string().unwrap())
-        .collect();
-    names.sort();
-    names
-}
-
 fn cause(err: &ConfigError) -> String {
     std::error::Error::source(err)
         .map(ToString::to_string)
@@ -313,43 +304,6 @@ fn load_resolves_program_paths_with_directory() {
         config.sources.youtube.yt_dlp_path,
         Path::new("/usr/local/bin/yt-dlp")
     );
-}
-
-#[test]
-fn write_atomic_replaces_content() {
-    let (dir, location) = setup_with("old");
-    location.write_atomic("new").unwrap();
-    assert_eq!(read(&location), "new");
-    assert_eq!(
-        files_in(dir.path()),
-        ["config.toml"],
-        "temp file left behind"
-    );
-}
-
-#[test]
-fn write_atomic_creates_missing_file() {
-    let (dir, location) = setup();
-    location.write_atomic("new").unwrap();
-    assert_eq!(read(&location), "new");
-    assert_eq!(files_in(dir.path()), ["config.toml"]);
-}
-
-#[test]
-fn write_atomic_overwrites_leftover_temp_file() {
-    let (dir, location) = setup_with("old");
-    fs::write(dir.path().join("config.toml.tmp"), "garbage from a crash").unwrap();
-    location.write_atomic("new").unwrap();
-    assert_eq!(read(&location), "new");
-    assert_eq!(files_in(dir.path()), ["config.toml"]);
-}
-
-#[test]
-fn write_atomic_fails_when_directory_is_missing() {
-    let dir = tempfile::tempdir().unwrap();
-    let location = ConfigLocation::new(dir.path().join("missing/config.toml")).unwrap();
-    let err = location.write_atomic("new").unwrap_err();
-    assert!(matches!(err, ConfigError::Write { .. }), "{err:?}");
 }
 
 #[test]
