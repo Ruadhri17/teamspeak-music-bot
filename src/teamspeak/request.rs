@@ -2,14 +2,14 @@ use tracing::{debug, warn};
 use tsclientlib::{ChannelId, ClientId, Connection, MessageHandle, OutCommandExt};
 
 use super::{
-    ClientError, ClientResult, ReplyTo,
+    ReplyTo, TeamspeakError, TeamspeakResult,
     home::{self, Summon},
 };
 use crate::chat;
 
 /// What the rest of the bot asks the client to do on the server.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ClientRequest {
+pub enum TeamspeakRequest {
     SendMessage {
         to: ReplyTo,
         text: String,
@@ -33,11 +33,11 @@ pub type Sent = (MessageHandle, &'static str);
 pub fn execute(
     connection: &mut Connection,
     home: Option<ChannelId>,
-    request: ClientRequest,
-) -> ClientResult<Option<Sent>> {
+    request: TeamspeakRequest,
+) -> TeamspeakResult<Option<Sent>> {
     match request {
-        ClientRequest::SendMessage { to, text } => send_message(connection, to, &text).map(Some),
-        ClientRequest::Summon {
+        TeamspeakRequest::SendMessage { to, text } => send_message(connection, to, &text).map(Some),
+        TeamspeakRequest::Summon {
             sender_id,
             reply_to,
             admin,
@@ -45,7 +45,7 @@ pub fn execute(
     }
 }
 
-fn send_message(connection: &mut Connection, to: ReplyTo, text: &str) -> ClientResult<Sent> {
+fn send_message(connection: &mut Connection, to: ReplyTo, text: &str) -> TeamspeakResult<Sent> {
     let handle = state(connection)?
         .send_message(to.into(), text)
         .send_with_result(connection)
@@ -59,7 +59,7 @@ fn summon(
     sender_id: u16,
     reply_to: ReplyTo,
     admin: bool,
-) -> ClientResult<Option<Sent>> {
+) -> TeamspeakResult<Option<Sent>> {
     let Some(home) = home else {
         warn!("!bot summon before the home channel is known, ignored");
         return Ok(None);
@@ -100,10 +100,10 @@ fn summon(
     }
 }
 
-fn state(connection: &Connection) -> ClientResult<&tsclientlib::data::Connection> {
+fn state(connection: &Connection) -> TeamspeakResult<&tsclientlib::data::Connection> {
     connection.get_state().map_err(request_error)
 }
 
-fn request_error(source: tsclientlib::Error) -> ClientError {
-    ClientError::Request(Box::new(source))
+fn request_error(source: tsclientlib::Error) -> TeamspeakError {
+    TeamspeakError::Request(Box::new(source))
 }

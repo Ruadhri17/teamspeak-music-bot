@@ -4,7 +4,6 @@
 mod audio;
 mod chat;
 mod cli;
-mod client;
 mod commands;
 mod config;
 mod logging;
@@ -14,6 +13,7 @@ mod presence;
 mod process;
 mod secrets;
 mod sources;
+mod teamspeak;
 
 use std::{
     path::Path,
@@ -24,10 +24,10 @@ use std::{
 use clap::Parser;
 
 use cli::{Cli, Command};
-use client::{AudioControl, Client};
 use config::{Config, ConfigLocation, LogLevel};
 use player::{AudioLauncher, Player};
 use secrets::Secrets;
+use teamspeak::{AudioControl, Client};
 use tokio::{
     signal::unix::{SignalKind, signal},
     sync::{mpsc, watch},

@@ -26,11 +26,11 @@ use tokio::{
 use tracing::debug;
 
 use crate::{
-    client::{AudioControl, ClientEvent, ClientRequest, ReplyTo, Sender},
     commands::Command,
     config::{Config, SourcesConfig, Volume},
     permissions::{self, Role},
     sources::Found,
+    teamspeak::{AudioControl, Author, ReplyTo, TeamspeakEvent, TeamspeakRequest},
 };
 use queue::Queue;
 use state::{Ended, Pending, State};
@@ -48,9 +48,9 @@ pub struct Player {
     /// The lookups in the order of the commands, a finished one waits for those before it.
     pending: VecDeque<Pending>,
     /// Chat messages from the client, the source of commands.
-    events: mpsc::Receiver<ClientEvent>,
+    events: mpsc::Receiver<TeamspeakEvent>,
     /// Error replies to the chat.
-    requests: mpsc::Sender<ClientRequest>,
+    requests: mpsc::Sender<TeamspeakRequest>,
     /// Starts the audio of a track, `AudioLauncher` outside of tests.
     launcher: Box<dyn Launcher>,
     /// Tells the client to hold the frames (pause) or drop a stopped track's frames.
@@ -59,7 +59,7 @@ pub struct Player {
     done_tx: mpsc::Sender<Ended>,
     done_rx: mpsc::Receiver<Ended>,
     /// Messages that are not direct replies to a command, sent after the current event is handled.
-    outbox: Vec<ClientRequest>,
+    outbox: Vec<TeamspeakRequest>,
     sources: SourcesConfig,
     /// `!bot volume` above this is refused.
     max_volume: Volume,
@@ -67,8 +67,8 @@ pub struct Player {
 
 impl Player {
     pub fn new(
-        events: mpsc::Receiver<ClientEvent>,
-        requests: mpsc::Sender<ClientRequest>,
+        events: mpsc::Receiver<TeamspeakEvent>,
+        requests: mpsc::Sender<TeamspeakRequest>,
         control: watch::Sender<AudioControl>,
         launcher: Box<dyn Launcher>,
         config: &Config,
@@ -119,37 +119,37 @@ impl Player {
 
     /// Queues a chat message for `send_outbox`.
     fn say(&mut self, to: ReplyTo, text: String) {
-        self.outbox.push(ClientRequest::SendMessage { to, text });
+        self.outbox.push(TeamspeakRequest::SendMessage { to, text });
     }
 
-    async fn handle_event(&mut self, event: ClientEvent) {
-        let ClientEvent::Message {
+    async fn handle_event(&mut self, event: TeamspeakEvent) {
+        let TeamspeakEvent::Message {
             reply_to,
-            sender,
+            author,
             text,
         } = event;
-        if let Some(text) = self.command(&text, reply_to, &sender) {
+        if let Some(text) = self.command(&text, reply_to, &author) {
             self.reply(reply_to, text).await;
         }
     }
 
-    /// Parses a chat message, checks the sender's permissions and runs the command.
+    /// Parses a chat message, checks the author's permissions and runs the command.
     /// Returns the chat reply, `None` for text that is not a command.
-    fn command(&mut self, text: &str, reply_to: ReplyTo, sender: &Sender) -> Option<String> {
+    fn command(&mut self, text: &str, reply_to: ReplyTo, author: &Author) -> Option<String> {
         let command = match Command::parse(text)? {
             Ok(command) => command,
             Err(err) => return Some(err.to_string()),
         };
-        if let Err(denied) = permissions::check(&command, sender.role, sender.in_bot_channel) {
-            debug!("command from {} refused: {denied}", sender.name);
+        if let Err(denied) = permissions::check(&command, author.role, author.in_bot_channel) {
+            debug!("command from {} refused: {denied}", author.name);
             return Some(denied.to_string());
         }
-        self.execute(command, reply_to, sender)
+        self.execute(command, reply_to, author)
     }
 
     /// Runs a command and returns the chat reply, if any.
     /// Success is silent, except for informational commands.
-    fn execute(&mut self, command: Command, reply_to: ReplyTo, sender: &Sender) -> Option<String> {
+    fn execute(&mut self, command: Command, reply_to: ReplyTo, author: &Author) -> Option<String> {
         match command {
             Command::Add { query, source, .. } => {
                 self.add(query, source, reply_to);
@@ -177,10 +177,10 @@ impl Player {
             Command::Help(text) => Some(text.to_string()),
             // The client knows the channels, it decides and answers.
             Command::Summon => {
-                self.outbox.push(ClientRequest::Summon {
-                    sender_id: sender.id,
+                self.outbox.push(TeamspeakRequest::Summon {
+                    sender_id: author.id,
                     reply_to,
-                    admin: sender.role == Role::Admin,
+                    admin: author.role == Role::Admin,
                 });
                 None
             }
@@ -194,7 +194,7 @@ impl Player {
     }
 
     async fn reply(&self, to: ReplyTo, text: String) {
-        let request = ClientRequest::SendMessage { to, text };
+        let request = TeamspeakRequest::SendMessage { to, text };
         // `Err` means the client has stopped, the reply is dropped.
         let _ = self.requests.send(request).await;
     }

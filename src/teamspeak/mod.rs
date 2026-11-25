@@ -1,11 +1,11 @@
-//! Translates server events into `ClientEvent` for the rest of the bot and executes
-//! `ClientRequest`s on the connection.
+//! Translates server events into `TeamspeakEvent` for the rest of the bot and executes
+//! `TeamspeakRequest`s on the connection.
 //!
 //! - `connect`: building the connection from the config
-//! - `event`: `ClientEvent` and translation from tsclientlib events
+//! - `event`: `TeamspeakEvent` and translation from tsclientlib events
 //! - `home`: the home channel and the decision for `!bot summon`
-//! - `request`: `ClientRequest` and executing it on the connection
-//! - `error`: `ClientError` for the whole module
+//! - `request`: `TeamspeakRequest` and executing it on the connection
+//! - `error`: `TeamspeakError` for the whole module
 
 mod connect;
 mod error;
@@ -15,9 +15,9 @@ mod request;
 #[cfg(test)]
 mod tests;
 
-pub use error::{ClientError, ClientResult};
-pub use event::{ClientEvent, ReplyTo, Sender};
-pub use request::ClientRequest;
+pub use error::{TeamspeakError, TeamspeakResult};
+pub use event::{Author, ReplyTo, TeamspeakEvent};
+pub use request::TeamspeakRequest;
 
 use std::{collections::HashMap, path::PathBuf};
 
@@ -70,9 +70,9 @@ impl Default for AudioControl {
 pub struct Client {
     connection: Connection,
     /// To the rest of the bot.
-    events: mpsc::Sender<ClientEvent>,
+    events: mpsc::Sender<TeamspeakEvent>,
     /// From the rest of the bot.
-    requests: mpsc::Receiver<ClientRequest>,
+    requests: mpsc::Receiver<TeamspeakRequest>,
     /// PCM frames from the audio thread, one encoded and sent per tick.
     frames: mpsc::Receiver<Frame>,
     control: watch::Receiver<AudioControl>,
@@ -103,12 +103,12 @@ impl Client {
     pub fn new(
         config: &Config,
         secrets: &TeamspeakSecrets,
-        events: mpsc::Sender<ClientEvent>,
-        requests: mpsc::Receiver<ClientRequest>,
+        events: mpsc::Sender<TeamspeakEvent>,
+        requests: mpsc::Receiver<TeamspeakRequest>,
         frames: mpsc::Receiver<Frame>,
         control: watch::Receiver<AudioControl>,
         shutdown: CancellationToken,
-    ) -> ClientResult<Self> {
+    ) -> TeamspeakResult<Self> {
         let identity_path = config.paths.state_dir.join(&config.teamspeak.identity_file);
         let identity = identity::load_or_create(&identity_path)?;
         Ok(Self {
@@ -118,7 +118,7 @@ impl Client {
             frames,
             control,
             output: Output::new(config.audio.bitrate, config.audio.complexity)
-                .map_err(ClientError::Encoder)?,
+                .map_err(TeamspeakError::Encoder)?,
             talking: false,
             identity_path,
             home_config: config.teamspeak.home_channel.clone(),
@@ -135,7 +135,7 @@ impl Client {
     /// Runs until `shutdown` is cancelled or the connection ends.
     /// tsclientlib sends outgoing commands only while `events()` is polled,
     /// so no branch may block for long.
-    pub async fn run(mut self) -> ClientResult<()> {
+    pub async fn run(mut self) -> TeamspeakResult<()> {
         let mut ticker = tokio::time::interval(FRAME_DURATION);
         ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
@@ -144,9 +144,9 @@ impl Client {
                 // The `async` block keeps the temporary stream alive while `next()` waits.
                 item = async { self.connection.events().next().await } => match item {
                     Some(Ok(item)) => self.handle_item(item).await,
-                    Some(Err(source)) => return Err(ClientError::Connection(source.into())),
+                    Some(Err(source)) => return Err(TeamspeakError::Connection(source.into())),
                     // Only `shutdown` ends the bot normally, an error lets systemd restart it.
-                    None => return Err(ClientError::Closed(self.left.take().unwrap_or_else(
+                    None => return Err(TeamspeakError::Closed(self.left.take().unwrap_or_else(
                         || "no reason given".to_owned(),
                     ))),
                 },
@@ -307,11 +307,11 @@ impl Client {
         }
 
         // Collected first, so the state is not borrowed while sending waits.
-        let translated: Vec<ClientEvent> = events
+        let translated: Vec<TeamspeakEvent> = events
             .iter()
             .filter_map(|event| {
                 event::translate(event, bot_id, |invoker| {
-                    sender(state, &self.permissions, invoker)
+                    author(state, &self.permissions, invoker)
                 })
             })
             .collect();
@@ -393,11 +393,11 @@ impl Client {
     }
 
     /// Disconnects cleanly, so the server does not wait for a timeout.
-    async fn disconnect(mut self) -> ClientResult<()> {
+    async fn disconnect(mut self) -> TeamspeakResult<()> {
         // TODO: `events.on_disconnect.message` as the reason shown to users.
         self.connection
             .disconnect(DisconnectOptions::new())
-            .map_err(|source| ClientError::Request(source.into()))?;
+            .map_err(|source| TeamspeakError::Request(source.into()))?;
         // Polls until the server confirms, the disconnect is sent only while polling.
         self.connection
             .events()
@@ -408,8 +408,8 @@ impl Client {
 }
 
 /// The role and channel of a message's author, from what the bot sees right now.
-/// A sender the bot cannot see gets no groups and counts as outside its channel.
-fn sender(state: &data::Connection, config: &PermissionsConfig, invoker: &Invoker) -> Sender {
+/// An author the bot cannot see gets no groups and counts as outside its channel.
+fn author(state: &data::Connection, config: &PermissionsConfig, invoker: &Invoker) -> Author {
     let client = state.clients.get(&invoker.id);
     let bot_channel = state.clients.get(&state.own_client).map(|bot| bot.channel);
     let groups: Vec<Group> = client
@@ -424,7 +424,7 @@ fn sender(state: &data::Connection, config: &PermissionsConfig, invoker: &Invoke
                 .collect()
         })
         .unwrap_or_default();
-    Sender {
+    Author {
         id: invoker.id.0,
         name: invoker.name.clone(),
         role: permissions::role(config, &groups),
@@ -468,14 +468,14 @@ fn warn_unseen_group_names(state: &data::Connection, config: &PermissionsConfig)
 
 /// `kicked by Admin`, `banned by Admin`, or the reason as tsclientlib names it.
 fn leave_reason(reason: Option<Reason>, invoker: Option<&Invoker>) -> String {
-    let what = match reason {
+    let action = match reason {
         Some(Reason::KickServer) => "kicked".to_owned(),
         Some(Reason::KickServerBan) => "banned".to_owned(),
         Some(other) => format!("{other:?}"),
         None => "removed".to_owned(),
     };
     match invoker {
-        Some(invoker) => format!("{what} by {}", invoker.name),
-        None => what,
+        Some(invoker) => format!("{action} by {}", invoker.name),
+        None => action,
     }
 }

@@ -1,7 +1,7 @@
 use secrecy::ExposeSecret;
 use tsclientlib::{ChannelId, Connection, Identity};
 
-use super::{ClientError, ClientResult};
+use super::{TeamspeakError, TeamspeakResult};
 use crate::{
     config::{ChannelRef, TeamspeakConfig},
     secrets::TeamspeakSecrets,
@@ -13,7 +13,7 @@ pub fn connect(
     config: &TeamspeakConfig,
     secrets: &TeamspeakSecrets,
     identity: Identity,
-) -> ClientResult<Connection> {
+) -> TeamspeakResult<Connection> {
     let options = Connection::build(config.address.as_str())
         .name(config.nickname.clone())
         .identity(identity);
@@ -37,5 +37,5 @@ pub fn connect(
     // The description is not a connect option, `Client` sets it once connected.
     options
         .connect()
-        .map_err(|source| ClientError::Connect(source.into()))
+        .map_err(|source| TeamspeakError::Connect(source.into()))
 }

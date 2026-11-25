@@ -2,7 +2,7 @@
 //!
 //! The "same channel as the bot" rule and summoning from the home channel.
 //! Dragging the bot to another channel is left to the server permissions.
-//! Pure functions: the client supplies the sender's groups and channel.
+//! Pure functions: the TeamSpeak client supplies the author's groups and channel.
 
 use thiserror::Error;
 
@@ -21,7 +21,7 @@ pub enum Role {
     User,
 }
 
-/// One server group of the sender.
+/// One server group of a message's author.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Group<'a> {
     pub id: u64,

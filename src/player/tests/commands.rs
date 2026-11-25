@@ -1,8 +1,8 @@
-use super::harness::{Harness, on_channel, sender};
+use super::harness::{Harness, author, on_channel};
 use crate::{
-    client::{ClientRequest, ReplyTo},
     config::Volume,
     permissions::Role,
+    teamspeak::{ReplyTo, TeamspeakRequest},
 };
 
 fn reply(text: &str) -> Option<String> {
@@ -110,7 +110,7 @@ async fn ping_answers_pong() {
 #[tokio::test]
 async fn config_commands_are_not_handled_by_the_player() {
     let mut h = Harness::new();
-    let admin = sender(1, Role::Admin, true);
+    let admin = author(1, Role::Admin, true);
     assert_eq!(
         h.send_as(ReplyTo::Channel, &admin, "!bot config list"),
         None
@@ -119,7 +119,7 @@ async fn config_commands_are_not_handled_by_the_player() {
         h.send_as(ReplyTo::Channel, &admin, "!bot config reload"),
         None
     );
-    assert!(h.client_requests().is_empty());
+    assert!(h.teamspeak_requests().is_empty());
 }
 
 #[tokio::test]
@@ -128,8 +128,8 @@ async fn summon_is_passed_to_the_client_with_the_sender() {
     let sender = ReplyTo::Client(7);
     assert_eq!(h.send_from(sender, "!bot summon"), None);
     assert_eq!(
-        h.client_requests(),
-        [ClientRequest::Summon {
+        h.teamspeak_requests(),
+        [TeamspeakRequest::Summon {
             sender_id: 7,
             reply_to: sender,
             admin: false,
@@ -141,11 +141,11 @@ async fn summon_is_passed_to_the_client_with_the_sender() {
 #[tokio::test]
 async fn summon_by_an_admin_is_marked() {
     let mut h = Harness::new();
-    let admin = sender(7, Role::Admin, false);
+    let admin = author(7, Role::Admin, false);
     assert_eq!(h.send_as(ReplyTo::Client(7), &admin, "!bot summon"), None);
     assert_eq!(
-        h.client_requests(),
-        [ClientRequest::Summon {
+        h.teamspeak_requests(),
+        [TeamspeakRequest::Summon {
             sender_id: 7,
             reply_to: ReplyTo::Client(7),
             admin: true,

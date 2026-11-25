@@ -1,7 +1,7 @@
 use std::num::NonZeroUsize;
 
 use super::harness::{Harness, on_channel};
-use crate::client::ReplyTo;
+use crate::teamspeak::ReplyTo;
 
 const SCRIPT: &str = r#"
 for arg; do target=$arg; done

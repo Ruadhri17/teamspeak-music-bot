@@ -1,6 +1,6 @@
 use crate::{
-    client::home::{ChannelInfo, Summon, resolve, summon},
     config::ChannelRef,
+    teamspeak::home::{ChannelInfo, Summon, resolve, summon},
 };
 
 fn channel(id: u64, parent: u64, name: &'static str) -> ChannelInfo<'static> {

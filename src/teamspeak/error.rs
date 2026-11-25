@@ -1,8 +1,8 @@
 use crate::secrets::identity::IdentityError;
 
-/// `tsclientlib::Error` is large, so it is boxed to keep every `ClientResult` small.
+/// `tsclientlib::Error` is large, so it is boxed to keep every `TeamspeakResult` small.
 #[derive(Debug, thiserror::Error)]
-pub enum ClientError {
+pub enum TeamspeakError {
     #[error("cannot connect to the TeamSpeak server")]
     Connect(#[source] Box<tsclientlib::Error>),
 
@@ -23,4 +23,4 @@ pub enum ClientError {
     Encoder(#[source] audiopus::Error),
 }
 
-pub type ClientResult<T> = Result<T, ClientError>;
+pub type TeamspeakResult<T> = Result<T, TeamspeakError>;

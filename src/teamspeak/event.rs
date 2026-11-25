@@ -4,23 +4,23 @@ use crate::permissions::Role;
 
 /// Server event in our own types, so the rest of the bot does not depend on tsclientlib.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ClientEvent {
+pub enum TeamspeakEvent {
     /// Chat message in the bot's channel, a private message or a poke to the bot.
     Message {
         reply_to: ReplyTo,
-        sender: Sender,
+        author: Author,
         text: String,
     },
 }
 
 /// Who sent a message, as the client sees them when it arrives.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Sender {
+pub struct Author {
     /// The client ID on the server, valid while they stay connected.
     pub id: u16,
     pub name: String,
     pub role: Role,
-    /// `false` also when the bot cannot see the sender's channel.
+    /// `false` also when the bot cannot see the author's channel.
     pub in_bot_channel: bool,
 }
 
@@ -42,12 +42,12 @@ impl From<ReplyTo> for MessageTarget {
 }
 
 /// Returns `None` for events the bot does not react to, including its own messages.
-/// `sender` looks up the role and channel of the message's author.
+/// `author` looks up the role and channel of the one who wrote the message.
 pub fn translate(
     event: &Event,
     bot_id: ClientId,
-    sender: impl FnOnce(&Invoker) -> Sender,
-) -> Option<ClientEvent> {
+    author: impl FnOnce(&Invoker) -> Author,
+) -> Option<TeamspeakEvent> {
     // TODO: later: clients joining and leaving the bot's channel, for `on_alone` and `on_party`.
     match event {
         Event::Message {
@@ -61,9 +61,9 @@ pub fn translate(
                 MessageTarget::Client(_) | MessageTarget::Poke(_) => ReplyTo::Client(invoker.id.0),
                 MessageTarget::Server => return None,
             };
-            Some(ClientEvent::Message {
+            Some(TeamspeakEvent::Message {
                 reply_to,
-                sender: sender(invoker),
+                author: author(invoker),
                 text: message.clone(),
             })
         }

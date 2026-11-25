@@ -14,12 +14,12 @@ use super::{
 use crate::{
     audio::{AudioError, AudioInput},
     chat,
-    client::ReplyTo,
     config::{SourceKind, SourcesConfig, Volume},
     sources::{
         Found, Location, QueryType, TrackRef, local,
         youtube::{self, YoutubeError},
     },
+    teamspeak::ReplyTo,
 };
 
 impl Player {

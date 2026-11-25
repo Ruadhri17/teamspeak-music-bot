@@ -4,8 +4,8 @@ use tokio::task::Id;
 use tokio_util::sync::CancellationToken;
 
 use crate::{
-    client::ReplyTo,
     sources::{Found, TrackRef},
+    teamspeak::ReplyTo,
 };
 
 /// Identifies one playback, so a late "finished" from an old track can be told apart.

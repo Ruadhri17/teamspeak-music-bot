@@ -6,13 +6,13 @@ use tokio_util::sync::CancellationToken;
 
 use crate::{
     audio::{AudioInput, PlayResult},
-    client::{AudioControl, ClientEvent, ClientRequest, ReplyTo, Sender},
     config::{Config, SourceKind},
     permissions::Role,
     player::{
         Launcher, Player,
         state::{Ended, PlaybackId, State},
     },
+    teamspeak::{AudioControl, Author, ReplyTo, TeamspeakEvent, TeamspeakRequest},
 };
 
 pub struct FakeLauncher;
@@ -33,8 +33,8 @@ pub struct Harness {
     pub dir: TempDir,
     pub scripts: Option<TempDir>,
     control: watch::Receiver<AudioControl>,
-    _events: mpsc::Sender<ClientEvent>,
-    _requests: mpsc::Receiver<ClientRequest>,
+    _events: mpsc::Sender<TeamspeakEvent>,
+    _requests: mpsc::Receiver<TeamspeakRequest>,
 }
 
 impl Harness {
@@ -119,8 +119,8 @@ impl Harness {
         self.send_as(reply_to, &user(id), text)
     }
 
-    pub fn send_as(&mut self, reply_to: ReplyTo, sender: &Sender, text: &str) -> Option<String> {
-        self.player.command(text, reply_to, sender)
+    pub fn send_as(&mut self, reply_to: ReplyTo, author: &Author, text: &str) -> Option<String> {
+        self.player.command(text, reply_to, author)
     }
 
     pub async fn next_lookup(&mut self) {
@@ -187,16 +187,16 @@ impl Harness {
     }
 
     pub fn outbox(&mut self) -> Vec<(ReplyTo, String)> {
-        self.client_requests()
+        self.teamspeak_requests()
             .into_iter()
             .map(|request| match request {
-                ClientRequest::SendMessage { to, text } => (to, text),
+                TeamspeakRequest::SendMessage { to, text } => (to, text),
                 other => panic!("not a message: {other:?}"),
             })
             .collect()
     }
 
-    pub fn client_requests(&mut self) -> Vec<ClientRequest> {
+    pub fn teamspeak_requests(&mut self) -> Vec<TeamspeakRequest> {
         std::mem::take(&mut self.player.outbox)
     }
 
@@ -221,8 +221,8 @@ pub fn on_channel(text: &str) -> Vec<(ReplyTo, String)> {
     vec![(ReplyTo::Channel, text.to_owned())]
 }
 
-pub fn sender(id: u16, role: Role, in_bot_channel: bool) -> Sender {
-    Sender {
+pub fn author(id: u16, role: Role, in_bot_channel: bool) -> Author {
+    Author {
         id,
         name: format!("user{id}"),
         role,
@@ -230,6 +230,6 @@ pub fn sender(id: u16, role: Role, in_bot_channel: bool) -> Sender {
     }
 }
 
-pub fn user(id: u16) -> Sender {
-    sender(id, Role::User, true)
+pub fn user(id: u16) -> Author {
+    author(id, Role::User, true)
 }
