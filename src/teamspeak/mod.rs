@@ -23,7 +23,10 @@ use std::{collections::HashMap, path::PathBuf};
 
 use futures::{StreamExt, future};
 use tokio::{
-    sync::{mpsc, watch},
+    sync::{
+        mpsc::{self, error::TrySendError},
+        watch,
+    },
     time::MissedTickBehavior,
 };
 use tokio_util::sync::CancellationToken;
@@ -143,7 +146,7 @@ impl Client {
             tokio::select! {
                 // The `async` block keeps the temporary stream alive while `next()` waits.
                 item = async { self.connection.events().next().await } => match item {
-                    Some(Ok(item)) => self.handle_item(item).await,
+                    Some(Ok(item)) => self.handle_item(item),
                     Some(Err(source)) => return Err(TeamspeakError::Connection(source.into())),
                     // Only `shutdown` ends the bot normally, an error lets systemd restart it.
                     None => return Err(TeamspeakError::Closed(self.left.take().unwrap_or_else(
@@ -165,9 +168,9 @@ impl Client {
         self.disconnect().await
     }
 
-    async fn handle_item(&mut self, item: StreamItem) {
+    fn handle_item(&mut self, item: StreamItem) {
         match item {
-            StreamItem::BookEvents(events) => self.forward_events(events).await,
+            StreamItem::BookEvents(events) => self.forward_events(events),
             // The channel tree is complete only after this, earlier book events have a part of it.
             StreamItem::MessageEvent(InMessage::ChannelListFinished(_)) => self.on_connected(),
             StreamItem::IdentityLevelIncreased => self.save_identity(),
@@ -284,7 +287,9 @@ impl Client {
         }
     }
 
-    async fn forward_events(&mut self, events: Vec<tsclientlib::events::Event>) {
+    /// Never waits for the bot: while a branch of `run` waits, no audio frame goes out,
+    /// so a stuck bot would also stop the sound. A full channel drops the event instead.
+    fn forward_events(&mut self, events: Vec<tsclientlib::events::Event>) {
         let Ok(state) = self.connection.get_state() else {
             // Happens when the server shuts down: tsclientlib drops the old state and then
             // hands over the last events of that connection.
@@ -306,7 +311,6 @@ impl Client {
             }
         }
 
-        // Collected first, so the state is not borrowed while sending waits.
         let translated: Vec<TeamspeakEvent> = events
             .iter()
             .filter_map(|event| {
@@ -320,8 +324,15 @@ impl Client {
             warn_unseen_group_names(state, &self.permissions);
         }
         for event in translated {
-            // `Err` means the receiver is gone, which only happens during shutdown.
-            let _ = self.events.send(event).await;
+            match self.events.try_send(event) {
+                Ok(()) => {}
+                // Without the event, a chat message may carry anything users wrote.
+                Err(TrySendError::Full(_)) => {
+                    warn!("the bot is not keeping up, an event from the server was dropped")
+                }
+                // The receiver is gone, which only happens during shutdown.
+                Err(TrySendError::Closed(_)) => {}
+            }
         }
     }
 
