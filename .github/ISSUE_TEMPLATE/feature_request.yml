@@ -1,0 +1,32 @@
+name: Feature request
+description: An idea for something new, or a change to what the bot does.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What you want to do
+      description: The situation and what is missing or annoying in it. The problem tells more than a ready solution.
+      placeholder: When several people add songs, I cannot tell who added which.
+    validations:
+      required: true
+
+  - type: textarea
+    id: idea
+    attributes:
+      label: How it could work
+      description: The command, the setting or the behavior you have in mind, with an example.
+      placeholder: "`!queue show` could print the nickname after each song."
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What you tried instead
+      description: Workarounds or other ways you thought about.
+
+  - type: checkboxes
+    id: help
+    attributes:
+      label: Contributing
+      options:
+        - label: I would like to implement it myself

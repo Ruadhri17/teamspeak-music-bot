@@ -1,0 +1,88 @@
+name: Bug report
+description: The bot does something wrong, crashes or does not start.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Before you paste anything, remove passwords and tokens.
+        `secrets.toml` and cookie files never belong in an issue.
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What did the bot do, and what did it answer in the chat, if anything?
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: How to make it happen again
+      description: The commands you typed, the link or search phrase, where the bot and the people were.
+      placeholder: |
+        1. The bot is in its home channel
+        2. `!song add https://www.youtube.com/watch?v=...`
+        3. ...
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Bot version
+      description: The output of `tsmusic --version`, or the commit when you built it yourself.
+      placeholder: tsmusic 0.1.0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install
+    attributes:
+      label: How the bot is installed
+      options:
+        - install.sh or tsmusic setup
+        - Built from source
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: system
+    attributes:
+      label: System
+      description: Distribution, version and architecture, e.g. from `cat /etc/os-release` and `uname -m`.
+      placeholder: Debian 13, x86_64
+    validations:
+      required: true
+
+  - type: input
+    id: teamspeak
+    attributes:
+      label: TeamSpeak
+      description: Server version, and the client version when it matters.
+      placeholder: Server 3.13.8, client 6.0
+
+  - type: textarea
+    id: log
+    attributes:
+      label: Log
+      description: |
+        The lines around the problem, from `journalctl -u tsmusic` or the terminal.
+        `--log-level debug` gives more detail.
+      render: text
+
+  - type: textarea
+    id: config
+    attributes:
+      label: Configuration
+      description: The parts of `config.toml` that matter, if any. Never `secrets.toml`.
+      render: toml

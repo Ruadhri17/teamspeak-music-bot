@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security problem
+    url: https://github.com/Ruadhri17/teamspeak-music-bot/security/advisories/new
+    about: Report vulnerabilities privately, not in a public issue.
+  - name: How do I ...?
+    url: https://github.com/Ruadhri17/teamspeak-music-bot/tree/main/docs
+    about: Installing, the commands and the settings are described in the docs.
