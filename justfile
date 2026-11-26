@@ -64,6 +64,18 @@ init *args:
 run *args:
     cargo run -- run -c config.toml {{args}}
 
+# Build and start the bot in Docker next to the local server, with dev/bot/config.toml
+bot-up:
+    {{compose}} --profile bot up -d --build ts3 bot
+
+# Stop the bot in Docker, the server keeps running
+bot-down:
+    {{compose}} --profile bot stop bot
+
+# Measure CPU, memory and network of the bot while it plays, e.g. `just bench --minutes 30`
+bench *args:
+    python3 dev/bench.py {{args}}
+
 # Start the local TeamSpeak server
 ts-up:
     {{compose}} up -d

@@ -1,0 +1,25 @@
+# The bot in dev/docker-compose.yml, for local tests and `just bench`. Not for a real server.
+# Every setting not here keeps its default, see config.example.toml.
+
+[teamspeak]
+address = "ts3"
+nickname = "MusicBot"
+# A fresh server does not let guests set their description.
+description = ""
+
+[paths]
+state_dir = "/bot/state"
+
+[sources.local]
+music_dir = "/bot/music"
+
+# `just bench` sends its commands through ServerQuery, and a query client is not a
+# listener: the bot counts itself alone, these keep it playing.
+[events.on_idle]
+delay = "24h"
+
+[events.on_alone]
+delay = "24h"
+
+[logging]
+metrics_interval = "10s"

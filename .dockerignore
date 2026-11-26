@@ -1,0 +1,7 @@
+# The build context of dev/bot.Dockerfile is the repository, only the sources go in.
+/target
+/state
+/config.toml
+/secrets.toml
+/.claude
+/.git

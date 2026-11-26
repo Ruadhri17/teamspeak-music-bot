@@ -1,9 +1,11 @@
-# Local TeamSpeak 3 server for testing the bot (development only).
+# Local TeamSpeak 3 server for testing the bot (development only), and the bot itself.
 #
 #   docker compose -f dev/docker-compose.yml up -d
 #   docker compose -f dev/docker-compose.yml logs ts3   # admin token on first start
 #   docker compose -f dev/docker-compose.yml down       # stop (data stays in the volume)
 #   docker compose -f dev/docker-compose.yml down -v    # stop and delete server data
+#
+# The bot starts only with its profile: `just bot-up`, or `just bench` (dev/bench.py).
 
 services:
   ts3:
@@ -12,6 +14,9 @@ services:
     restart: unless-stopped
     environment:
       TS3SERVER_LICENSE: accept
+      # A known password for dev/bench.py, which drives the bot through ServerQuery.
+      # The ports are bound to localhost only.
+      TS3SERVER_SERVERADMIN_PASSWORD: dev-only-password
     # Ports bound to localhost only, the dev server has no business on the LAN/VPN.
     # With WSL mirrored networking the Windows TS client still reaches it at localhost,
     # and the bot (inside WSL) connects to localhost.
@@ -22,5 +27,19 @@ services:
     volumes:
       - ts3-data:/var/ts3server
 
+  # Connects to ts3 inside the compose network, with dev/bot/config.toml.
+  bot:
+    build:
+      context: ..
+      dockerfile: dev/bot.Dockerfile
+    container_name: tsmusic-dev-bot
+    profiles: [bot]
+    restart: unless-stopped
+    depends_on: [ts3]
+    volumes:
+      - ./bot/config.toml:/bot/config.toml:ro
+      - bot-state:/bot/state
+
 volumes:
   ts3-data:
+  bot-state:
