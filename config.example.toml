@@ -82,12 +82,12 @@ show_page_size = 15                 # [live] entries per page in !queue show
 [permissions]
 # Server groups by name (case-insensitive) or ID, e.g. ["Admin", 6].
 # Everyone in the bot's channel controls it. Who may drag the bot is set on the server.
-admin_groups = ["Admin", "Owner"]   # [live] !bot config, summon while the bot is busy elsewhere
+admin_groups = []                   # [live] !bot config, summon while the bot is busy elsewhere, empty = no admins
 blocked_groups = []                 # [live] e.g. ["No Bot"], cannot control or summon, admin takes precedence
 
 [sources]
 default = "youtube"                 # [live] tidal | spotify | youtube | soundcloud | local
-max_playlist_len = 100              # [live] most songs one playlist link adds, the rest is left out
+max_playlist_len = 500              # [live] most songs one playlist link adds, the rest is left out
 max_parallel_lookups = 2            # [restart] lookups of !song add running at once (one yt-dlp each), the rest wait their turn. Raise it on a stronger machine
 
 [sources.tidal]

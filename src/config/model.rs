@@ -212,25 +212,14 @@ impl Default for QueueConfig {
 
 /// Roles come from server groups. Everyone else in the bot's channel is a user.
 /// Dragging the bot and joining channels are left to the server permissions.
-#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
+/// Both lists are empty by default, group names differ from server to server.
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Default)]
 #[serde(default, deny_unknown_fields)]
 pub struct PermissionsConfig {
     /// May use `!bot config` and summon the bot while it is busy elsewhere.
     pub admin_groups: Vec<GroupRef>,
     /// May not control or summon the bot. Admin takes precedence.
     pub blocked_groups: Vec<GroupRef>,
-}
-
-impl Default for PermissionsConfig {
-    fn default() -> Self {
-        Self {
-            admin_groups: vec![
-                GroupRef::Name("Admin".into()),
-                GroupRef::Name("Owner".into()),
-            ],
-            blocked_groups: Vec::new(),
-        }
-    }
 }
 
 /// Server group ID or name (case-insensitive).
@@ -260,7 +249,7 @@ impl Default for SourcesConfig {
     fn default() -> Self {
         Self {
             default: SourceKind::default(),
-            max_playlist_len: NonZeroUsize::new(100).unwrap(),
+            max_playlist_len: NonZeroUsize::new(500).unwrap(),
             max_parallel_lookups: NonZeroUsize::new(2).unwrap(),
             tidal: TidalConfig::default(),
             youtube: YoutubeConfig::default(),

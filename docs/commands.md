@@ -41,7 +41,7 @@ Commands are grouped into three families:
 - **Users** in the **same channel** as the bot.
 - **Admins** from anywhere on the server. Admins can also move the bot out of a channel where it is busy, and they are the only ones who can use `!bot config`.
 
-Who counts as an admin is set in the bot configuration by **server group** (by name or ID), by default the `Admin` and `Owner` groups. Members of chosen server groups can be **excluded**: they cannot control or summon the bot. Who may drag the bot to another channel is decided by the server permissions, not by the bot. Ask your server admin if you are unsure of your role.
+Who counts as an admin is set in the bot configuration by **server group** (by name or ID). Members of chosen server groups can be **excluded**: they cannot control or summon the bot. Who may drag the bot to another channel is decided by the server permissions, not by the bot. Ask your server admin if you are unsure of your role.
 
 Commands from other channels are rejected with a short message. `!help`, `!bot ping` and `!bot summon` work from anywhere.
 
@@ -100,7 +100,7 @@ YouTube links:
 - `youtube.com/playlist?list=...` (also on `music.youtube.com`) adds the whole playlist. Private and deleted videos are skipped.
 - A video opened from a playlist (`watch?v=...&list=...`) adds **only that video**, so you don't get a whole playlist by accident. To add the playlist, open it and copy the link of the playlist page.
 - YouTube **mixes** (playlists starting with `RD`, made by YouTube while you listen) are not supported. Add a single video or a regular playlist instead.
-- One playlist link adds at most **100** songs by default (the bot administrator may change the limit). The rest of the playlist is left out.
+- One playlist link adds at most **500** songs by default (the bot administrator may change the limit). The rest of the playlist is left out.
 - Live streams play until you skip them with `!song next`. Streams that have not started yet cannot be played.
 
 **Search phrases** are free text, passed to the service's search just as you typed them. You can write the title alone, the artist and the title, the title and the artist, and so on. The bot adds the **first result**.
@@ -113,14 +113,14 @@ YouTube links:
 | --- | --- | --- |
 | `tidal` | Tidal | Planned |
 | `spotify` | Spotify | Planned |
-| `youtube` | YouTube / YouTube Music (default) | First to be supported |
+| `youtube` | YouTube / YouTube Music (default) | Supported |
 | `soundcloud` | SoundCloud | Planned |
 | `local` | Audio files stored on the bot's server | Supported |
 
 After adding:
 
 - If nothing is playing, the song starts immediately. Otherwise it goes to the **end of the queue**. Adding a single song gives no reply, the bot only answers when something goes wrong.
-- After a playlist the bot says how many songs it added, e.g. `added 37 songs from Chill Evening`, or `added 100 of 182 songs from ...` when part of the playlist was over the limit.
+- After a playlist the bot says how many songs it added, e.g. `added 37 songs from Chill Evening`, or `added 500 of 731 songs from ...` when part of the playlist was over the limit.
 - Searching and adding happen in the background, so you can keep using commands in the meantime. Songs keep the order of your commands, even when a later search finishes first.
 - If the queue fills up in the middle of a playlist, the bot adds what fits and tells you how many songs that was.
 - If a track is unavailable, the bot says so and moves on to the next one.
@@ -194,9 +194,3 @@ The bot accepts these commands only from admins, and only in a private message, 
 - Secrets (passwords, tokens) are not part of these settings. They are kept in a separate, protected file and cannot be viewed or changed from the chat.
 - `set` checks the new value, applies it and saves it to `config.toml`. Some settings, such as the server address, only take effect after the bot restarts; the bot tells you when that is the case.
 - `reload` reads `config.toml` again after you have edited it by hand. If the file has an error, the bot keeps its current settings and tells you where the error is.
-
-## Planned commands
-
-These commands are not designed in detail yet:
-
-- `!song search <phrase>` and `!song pick <n>`: choose a search result from a list

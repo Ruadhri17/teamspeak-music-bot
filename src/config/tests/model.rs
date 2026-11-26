@@ -90,9 +90,10 @@ fn group_ref_accepts_ids_and_names_in_one_list() {
 }
 
 #[test]
-fn empty_list_replaces_default_groups() {
-    let config = parse("[permissions]\nadmin_groups = []\n").unwrap();
+fn permission_groups_are_empty_by_default() {
+    let config = parse("").unwrap();
     assert!(config.permissions.admin_groups.is_empty());
+    assert!(config.permissions.blocked_groups.is_empty());
 }
 
 #[test]
@@ -147,15 +148,15 @@ fn queue_sizes_reject_zero() {
 }
 
 #[test]
-fn max_playlist_len_defaults_to_100() {
+fn max_playlist_len_defaults_to_500() {
     assert_eq!(
         parse("").unwrap().sources.max_playlist_len,
-        NonZeroUsize::new(100).unwrap()
+        NonZeroUsize::new(500).unwrap()
     );
-    let config = parse("[sources]\nmax_playlist_len = 500\n").unwrap();
+    let config = parse("[sources]\nmax_playlist_len = 50\n").unwrap();
     assert_eq!(
         config.sources.max_playlist_len,
-        NonZeroUsize::new(500).unwrap()
+        NonZeroUsize::new(50).unwrap()
     );
     assert!(parse("[sources]\nmax_playlist_len = 0\n").is_err());
 }
