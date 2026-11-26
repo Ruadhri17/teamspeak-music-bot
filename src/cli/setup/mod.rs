@@ -93,6 +93,9 @@ fn steps(options: Options) -> anyhow::Result<()> {
     };
 
     install_tools(&mut runner, manager, &tools)?;
+    if !options.dry_run {
+        check_tools(&tools)?;
+    }
     let restarted = if service {
         set_up_service(&mut runner, options.update)?
     } else {
@@ -117,6 +120,13 @@ fn choose_tools(
     .required(false);
     for (tool, version) in installed {
         let hint = match version {
+            Some(version) if *tool == Tool::Ffmpeg && crate::ffmpeg_too_old(version) => {
+                format!(
+                    "{version} installed, too old for local files (needs {}.0), {}",
+                    crate::MIN_FFMPEG_MAJOR,
+                    tool.purpose()
+                )
+            }
             Some(version) => format!("{version} installed, {}", tool.purpose()),
             None => format!("missing, {}", tool.purpose()),
         };
@@ -137,6 +147,36 @@ fn warn_missing(installed: &[(Tool, Option<String>)], chosen: &[Tool]) -> io::Re
             "The bot does not start without {}, install it before starting the bot.",
             missing.join(", ")
         ))?;
+    }
+    Ok(())
+}
+
+/// What the bot checks at start, told now: a chosen program that does not start (e.g.
+/// yt-dlp on a too old Python), or an ffmpeg too old for local files.
+fn check_tools(chosen: &[Tool]) -> io::Result<()> {
+    for tool in Tool::ALL {
+        match system::installed_version(tool) {
+            None if chosen.contains(&tool) => {
+                let why = match tool {
+                    Tool::YtDlp => {
+                        "it needs Python 3.11 or newer, `python3 --version` shows yours".to_owned()
+                    }
+                    _ => format!("`{} {}` shows why", tool.name(), tool.version_flag()),
+                };
+                log::warning(format!(
+                    "{} was installed but does not start, {why}.",
+                    tool.name()
+                ))?;
+            }
+            Some(version) if tool == Tool::Ffmpeg && crate::ffmpeg_too_old(&version) => {
+                log::warning(format!(
+                    "ffmpeg {version} is too old: local files and the sounds of events need \
+                     ffmpeg {}.0 or newer, which the packages of this system do not have.",
+                    crate::MIN_FFMPEG_MAJOR
+                ))?;
+            }
+            _ => {}
+        }
     }
     Ok(())
 }

@@ -99,12 +99,41 @@ fn check_dependencies(config: &Config) -> anyhow::Result<Vec<(&'static str, Stri
     ])
 }
 
-/// The first word starting with a digit: `ffmpeg version 7.1 Copyright ...` gives `7.1`,
-/// `deno 2.9.8 (stable, ...)` gives `2.9.8`. The whole line if there is none.
+/// The version in the first line of `--version`: the word after `version` when it has a
+/// digit (`ffmpeg version n8.1.3-41-g...` gives `n8.1.3-41-g...`), otherwise the first word
+/// starting with a digit (`deno 2.9.8 (stable, ...)` gives `2.9.8`). The whole line if
+/// there is none.
 fn version_number(line: &str) -> &str {
-    line.split_whitespace()
-        .find(|word| word.starts_with(|c: char| c.is_ascii_digit()))
+    let words: Vec<&str> = line.split_whitespace().collect();
+    words
+        .windows(2)
+        .find(|pair| pair[0] == "version" && pair[1].contains(|c: char| c.is_ascii_digit()))
+        .map(|pair| pair[1])
+        .or_else(|| {
+            words
+                .iter()
+                .copied()
+                .find(|word| word.starts_with(|c: char| c.is_ascii_digit()))
+        })
         .unwrap_or(line.trim())
+}
+
+/// Older ffmpeg cannot read a file given as its stdin (`-fd`), which local files and the
+/// sounds of events need. Streams work with any version.
+const MIN_FFMPEG_MAJOR: u32 = 6;
+
+/// `version` from `version_number` is below `MIN_FFMPEG_MAJOR`: `5.1.9-0+deb12u1` is,
+/// `n8.1.3-41-g...` is not. A build from git (`N-...`) has no version to tell, it passes.
+fn ffmpeg_too_old(version: &str) -> bool {
+    let digits: String = version
+        .strip_prefix('n')
+        .unwrap_or(version)
+        .chars()
+        .take_while(char::is_ascii_digit)
+        .collect();
+    digits
+        .parse::<u32>()
+        .is_ok_and(|major| major < MIN_FFMPEG_MAJOR)
 }
 
 /// Lists every missing program at once, so a new setup is fixed in one go.
@@ -146,6 +175,12 @@ async fn run(location: &ConfigLocation, log_level: Option<LogLevel>) -> anyhow::
     info!("using config file {}", location.file_path().display());
     for (name, version) in check_dependencies(&config)? {
         info!("{name}: {version}");
+        if name == "ffmpeg" && ffmpeg_too_old(&version) {
+            warn!(
+                "ffmpeg {version} is too old: local files and the sounds of events need \
+                 ffmpeg {MIN_FFMPEG_MAJOR}.0 or newer, YouTube works"
+            );
+        }
     }
 
     let secrets = Secrets::load(&config.paths.secrets_file)?;
@@ -249,11 +284,31 @@ mod tests {
                 "2.9.8",
             ),
             ("2026.10.26", "2026.10.26"),
+            (
+                "ffmpeg version n8.1.3-41-ga8029b6528-20261126 Copyright (c) 2000-2026",
+                "n8.1.3-41-ga8029b6528-20261126",
+            ),
             ("  no version here ", "no version here"),
             ("", ""),
         ];
         for (line, version) in cases {
             assert_eq!(version_number(line), version, "{line}");
+        }
+    }
+
+    #[test]
+    fn ffmpeg_below_6_is_too_old() {
+        for old in ["5.1.9-0+deb12u1", "4.4.2-0ubuntu0.22.04.1", "n5.1"] {
+            assert!(ffmpeg_too_old(old), "{old}");
+        }
+        for new in [
+            "6.1.1-3ubuntu5",
+            "7.1.5-0+deb13u1",
+            "n8.1.3-41-ga8029b6528-20261126",
+            "N-112345-gabcdef",
+            "10.0",
+        ] {
+            assert!(!ffmpeg_too_old(new), "{new}");
         }
     }
 
