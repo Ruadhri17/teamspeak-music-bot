@@ -105,9 +105,10 @@ impl Decoder {
         }
 
         let mut frame = [0f32; FRAME_SAMPLES];
-        for (sample, chunk) in frame.iter_mut().zip(bytes.chunks_exact(4)) {
-            // `chunks_exact(4)` gives 4-byte slices, so the conversion to `[u8; 4]` cannot fail.
-            *sample = f32::from_le_bytes(chunk.try_into().unwrap());
+        // FRAME_BYTES is a multiple of 4, nothing is left over.
+        let (chunks, _) = bytes.as_chunks::<4>();
+        for (sample, chunk) in frame.iter_mut().zip(chunks) {
+            *sample = f32::from_le_bytes(*chunk);
         }
         self.frames += 1;
         Ok(Some(frame))
