@@ -6,7 +6,7 @@ use std::{
 use tempfile::TempDir;
 
 use crate::config::{
-    Config, ConfigError,
+    Config, ConfigError, Sound,
     location::{ConfigLocation, TEMPLATE},
 };
 
@@ -219,9 +219,11 @@ state_dir = "data/state"
 secrets_file = "private/secrets.toml"
 
 [events.on_idle]
+delay = "1m"
 sound = "sounds/bye.wav"
 
 [events.on_alone]
+delay = "1m"
 sound = "alone.wav"
 
 [events.on_party]
@@ -237,12 +239,15 @@ music_dir = "music"
     assert_eq!(config.paths.secrets_file, base.join("private/secrets.toml"));
     assert_eq!(
         config.events.on_idle.sound,
-        Some(base.join("sounds/bye.wav"))
+        Some(Sound::File(base.join("sounds/bye.wav")))
     );
-    assert_eq!(config.events.on_alone.sound, Some(base.join("alone.wav")));
+    assert_eq!(
+        config.events.on_alone.sound,
+        Some(Sound::File(base.join("alone.wav")))
+    );
     assert_eq!(
         config.events.on_party.sound,
-        Some(base.join("sounds/hi.wav"))
+        Some(Sound::File(base.join("sounds/hi.wav")))
     );
     assert_eq!(config.sources.local.music_dir, Some(base.join("music")));
 }
@@ -255,6 +260,7 @@ fn load_keeps_absolute_paths() {
 state_dir = "/var/lib/tsmusic"
 
 [events.on_idle]
+delay = "1m"
 sound = "/usr/share/tsmusic/bye.wav"
 
 [sources.local]
@@ -264,8 +270,8 @@ music_dir = "/srv/music"
     let config = location.load().unwrap();
     assert_eq!(config.paths.state_dir, Path::new("/var/lib/tsmusic"));
     assert_eq!(
-        config.events.on_idle.sound.as_deref(),
-        Some(Path::new("/usr/share/tsmusic/bye.wav"))
+        config.events.on_idle.sound,
+        Some(Sound::File("/usr/share/tsmusic/bye.wav".into()))
     );
     assert_eq!(
         config.sources.local.music_dir.as_deref(),
@@ -318,5 +324,20 @@ fn load_rejects_config_breaking_validation_rule() {
         cause(&err).contains("audio.default_volume"),
         "{}",
         cause(&err)
+    );
+}
+
+#[test]
+fn load_keeps_sound_links() {
+    let (_dir, location) = setup_with(
+        r#"
+[events.on_party]
+sound = "https://youtu.be/dQw4w9WgXcQ"
+"#,
+    );
+    let config = location.load().unwrap();
+    assert_eq!(
+        config.events.on_party.sound,
+        Some(Sound::Link("https://youtu.be/dQw4w9WgXcQ".parse().unwrap()))
     );
 }

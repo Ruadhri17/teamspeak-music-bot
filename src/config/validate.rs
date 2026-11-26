@@ -2,7 +2,9 @@ use std::{ops::RangeInclusive, path::Path};
 
 use humantime::format_duration;
 
-use super::{AudioConfig, ChannelRef, Config, EventsConfig, TeamspeakConfig};
+use super::{
+    AudioConfig, ChannelRef, Config, Destination, Event, EventsConfig, Sound, TeamspeakConfig,
+};
 
 /// TeamSpeak refuses nicknames outside this length (in characters).
 const NICKNAME_LEN: RangeInclusive<usize> = 3..=30;
@@ -57,15 +59,7 @@ pub fn validate(config: &Config) -> Result<(), ValidationError> {
 fn teamspeak(ts: &TeamspeakConfig) -> Result<(), ValidationError> {
     not_blank("teamspeak.address", &ts.address)?;
     not_blank("teamspeak.nickname", &ts.nickname)?;
-
-    let len = ts.nickname.chars().count();
-    ensure(NICKNAME_LEN.contains(&len), "teamspeak.nickname", || {
-        format!(
-            "must be {} to {} characters long (has {len})",
-            NICKNAME_LEN.start(),
-            NICKNAME_LEN.end()
-        )
-    })?;
+    nickname_len("teamspeak.nickname", &ts.nickname)?;
 
     not_empty_path("teamspeak.identity_file", &ts.identity_file)?;
 
@@ -118,31 +112,86 @@ fn events(events: &EventsConfig) -> Result<(), ValidationError> {
         || "must be greater than 0".into(),
     )?;
 
-    optional_path("events.on_idle.sound", events.on_idle.sound.as_deref())?;
-    optional_path("events.on_alone.sound", events.on_alone.sound.as_deref())?;
-    optional_path("events.on_party.sound", events.on_party.sound.as_deref())?;
-
-    optional_text(
-        "events.on_connect.message",
-        events.on_connect.message.as_deref(),
+    event(
+        &events.on_connect,
+        [
+            "events.on_connect.message",
+            "events.on_connect.sound",
+            "events.on_connect.move_to",
+            "events.on_connect.nickname",
+        ],
+    )?;
+    event(
+        &events.on_idle,
+        [
+            "events.on_idle.message",
+            "events.on_idle.sound",
+            "events.on_idle.move_to",
+            "events.on_idle.nickname",
+        ],
+    )?;
+    event(
+        &events.on_alone,
+        [
+            "events.on_alone.message",
+            "events.on_alone.sound",
+            "events.on_alone.move_to",
+            "events.on_alone.nickname",
+        ],
+    )?;
+    event(
+        &events.on_party,
+        [
+            "events.on_party.message",
+            "events.on_party.sound",
+            "events.on_party.move_to",
+            "events.on_party.nickname",
+        ],
+    )?;
+    event(
+        &events.on_song_start,
+        [
+            "events.on_song_start.message",
+            "events.on_song_start.sound",
+            "events.on_song_start.move_to",
+            "events.on_song_start.nickname",
+        ],
     )?;
     optional_text(
         "events.on_disconnect.message",
         events.on_disconnect.message.as_deref(),
-    )?;
-    optional_text("events.on_idle.message", events.on_idle.message.as_deref())?;
-    optional_text(
-        "events.on_alone.message",
-        events.on_alone.message.as_deref(),
-    )?;
-    optional_text(
-        "events.on_party.message",
-        events.on_party.message.as_deref(),
-    )?;
-    optional_text(
-        "events.on_song_start.message",
-        events.on_song_start.message.as_deref(),
     )
+}
+
+/// The field names of `message`, `sound`, `move_to` and `nickname`, errors need them `'static`.
+/// An empty `description` is valid, it clears the description.
+fn event(
+    event: &Event,
+    [message, sound, move_to, nickname]: [&'static str; 4],
+) -> Result<(), ValidationError> {
+    optional_text(message, event.message.as_deref())?;
+    if let Some(Sound::File(path)) = &event.sound {
+        optional_path(sound, Some(path))?;
+    }
+    if let Some(Destination::Channel(ChannelRef::Name(name))) = &event.move_to {
+        not_blank(move_to, name)?;
+    }
+    if let Some(name) = &event.nickname {
+        optional_text(nickname, Some(name))?;
+        nickname_len(nickname, name)?;
+    }
+    Ok(())
+}
+
+fn nickname_len(field: &'static str, nickname: &str) -> Result<(), ValidationError> {
+    let len = nickname.chars().count();
+    ensure(NICKNAME_LEN.contains(&len), field, || {
+        format!(
+            "must be {} to {} characters long (has {len})",
+            NICKNAME_LEN.start(),
+            NICKNAME_LEN.end()
+        )
+    })
 }
 
 fn ensure(

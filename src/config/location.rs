@@ -6,7 +6,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use super::{Config, ConfigError, ConfigResult, validate::validate};
+use super::{Config, ConfigError, ConfigResult, Sound, validate::validate};
 
 /// Commented template written by `tsmusic init`. Path is relative to this source file.
 pub(super) const TEMPLATE: &str = include_str!("../../config.example.toml");
@@ -100,23 +100,27 @@ impl ConfigLocation {
         Ok(config)
     }
 
-    /// Makes relative paths (`state_dir`, `secrets_file`, event sounds, `music_dir`)
-    /// relative to `base_dir`.
+    /// Makes relative paths (`state_dir`, `secrets_file`, event sound files, `music_dir`)
+    /// relative to `base_dir`. Links in event sounds stay as they are.
     /// Bare program names (`ffmpeg`, `yt-dlp`) stay as they are and are looked up in `PATH`.
     /// `teamspeak.identity_file` is relative to `state_dir` and is joined where it is used.
     fn resolve_paths(&self, config: &mut Config) {
         self.resolve(&mut config.paths.state_dir);
         self.resolve(&mut config.paths.secrets_file);
 
-        for path in [
-            &mut config.events.on_idle.sound,
-            &mut config.events.on_alone.sound,
-            &mut config.events.on_party.sound,
-            &mut config.sources.local.music_dir,
-        ]
-        .into_iter()
-        .flatten()
-        {
+        let events = &mut config.events;
+        let sounds = [
+            &mut events.on_connect.sound,
+            &mut events.on_idle.sound,
+            &mut events.on_alone.sound,
+            &mut events.on_party.sound,
+            &mut events.on_song_start.sound,
+        ];
+        let sound_files = sounds.into_iter().filter_map(|sound| match sound {
+            Some(Sound::File(path)) => Some(path),
+            _ => None,
+        });
+        for path in sound_files.chain(config.sources.local.music_dir.as_mut()) {
             self.resolve(path);
         }
 

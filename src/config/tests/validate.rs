@@ -1,6 +1,6 @@
 use std::{path::PathBuf, time::Duration};
 
-use crate::config::{ChannelRef, Config, Volume, validate::validate};
+use crate::config::{ChannelRef, Config, Destination, Sound, Volume, validate::validate};
 
 fn with_volumes(default: u8, max: u8) -> Config {
     let mut config = Config::default();
@@ -146,13 +146,13 @@ fn empty_optional_values_are_rejected() {
             c.sources.local.music_dir = Some(PathBuf::new())
         }),
         ("events.on_idle.sound", |c| {
-            c.events.on_idle.sound = Some(PathBuf::new())
+            c.events.on_idle.sound = Some(Sound::File(PathBuf::new()))
         }),
         ("events.on_alone.sound", |c| {
-            c.events.on_alone.sound = Some(PathBuf::new())
+            c.events.on_alone.sound = Some(Sound::File(PathBuf::new()))
         }),
         ("events.on_party.sound", |c| {
-            c.events.on_party.sound = Some(PathBuf::new())
+            c.events.on_party.sound = Some(Sound::File(PathBuf::new()))
         }),
         ("events.on_connect.message", |c| {
             c.events.on_connect.message = Some(String::new())
@@ -189,7 +189,7 @@ fn empty_optional_value_error_message_has_hint() {
 fn filled_optional_values_are_valid() {
     let mut config = Config::default();
     config.sources.local.music_dir = Some("music".into());
-    config.events.on_idle.sound = Some("bye.wav".into());
+    config.events.on_idle.sound = Some(Sound::File("bye.wav".into()));
     config.events.on_idle.message = Some("See you later".into());
     config.events.on_song_start.message = Some("Now playing: {title}".into());
     assert!(validate(&config).is_ok());
@@ -242,5 +242,38 @@ fn player_clients_may_be_empty_or_several() {
     config.sources.youtube.player_clients = Vec::new();
     assert!(validate(&config).is_ok());
     config.sources.youtube.player_clients = vec!["visionos".into(), "tv_samsung".into()];
+    assert!(validate(&config).is_ok());
+}
+
+#[test]
+fn event_actions_are_checked() {
+    assert_each_rejected(&[
+        ("events.on_party.nickname", |c| {
+            c.events.on_party.nickname = Some("ab".into())
+        }),
+        ("events.on_idle.nickname", |c| {
+            c.events.on_idle.nickname = Some(" ".into())
+        }),
+        ("events.on_alone.move_to", |c| {
+            c.events.on_alone.move_to = Some(Destination::Channel(ChannelRef::Name(" ".into())))
+        }),
+    ]);
+}
+
+#[test]
+fn written_leaving_event_needs_its_delay() {
+    let mut config = Config::default();
+    config.events.on_alone = Default::default();
+    assert_eq!(
+        validate(&config).unwrap_err().to_string(),
+        "events.on_alone.delay: must be greater than 0"
+    );
+}
+
+#[test]
+fn empty_event_description_clears_it() {
+    let mut config = Config::default();
+    config.events.on_party.description = Some(String::new());
+    config.events.on_party.nickname = Some("Music Bot".into());
     assert!(validate(&config).is_ok());
 }

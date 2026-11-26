@@ -159,3 +159,95 @@ fn max_playlist_len_defaults_to_100() {
     );
     assert!(parse("[sources]\nmax_playlist_len = 0\n").is_err());
 }
+
+#[test]
+fn move_to_takes_home_or_a_channel() {
+    let config = parse(
+        "[events.on_idle]\ndelay = \"5m\"\nmove_to = \"home\"\n\
+         [events.on_alone]\ndelay = \"1m\"\nmove_to = { channel = 22 }\n\
+         [events.on_party]\ndelay = \"0s\"\nmove_to = { channel = \"Music/Rock\" }\n",
+    )
+    .unwrap();
+    assert_eq!(config.events.on_idle.move_to, Some(Destination::Home));
+    assert_eq!(
+        config.events.on_alone.move_to,
+        Some(Destination::Channel(ChannelRef::Id(22)))
+    );
+    assert_eq!(
+        config.events.on_party.move_to,
+        Some(Destination::Channel(ChannelRef::Name("Music/Rock".into())))
+    );
+}
+
+#[test]
+fn move_to_rejects_other_values() {
+    for value in ["\"away\"", "22", "{ room = 22 }", "true"] {
+        let toml = format!("[events.on_idle]\ndelay = \"5m\"\nmove_to = {value}\n");
+        assert!(parse(&toml).is_err(), "{value}");
+    }
+}
+
+#[test]
+fn written_event_has_only_its_actions() {
+    let config = parse("[events.on_idle]\ndelay = \"5m\"\n").unwrap();
+    assert_eq!(
+        config.events.on_idle,
+        Event {
+            delay: Duration::from_secs(300),
+            ..Event::default()
+        }
+    );
+}
+
+#[test]
+fn missing_events_go_home() {
+    let config = parse("").unwrap();
+    assert_eq!(config.events.on_idle.move_to, Some(Destination::Home));
+    assert_eq!(config.events.on_alone.move_to, Some(Destination::Home));
+    assert_eq!(config.events.on_party.move_to, None);
+}
+
+fn party_sound(value: &str) -> Option<Sound> {
+    let toml = format!("[events.on_party]\nsound = {value:?}\n");
+    parse(&toml).unwrap().events.on_party.sound
+}
+
+#[test]
+fn sound_takes_a_file_or_a_link() {
+    let cases = [
+        ("goodbye.wav", Sound::File("goodbye.wav".into())),
+        (
+            "sounds/my goodbye.wav",
+            Sound::File("sounds/my goodbye.wav".into()),
+        ),
+        (
+            "/srv/sounds/bye.ogg",
+            Sound::File("/srv/sounds/bye.ogg".into()),
+        ),
+        (
+            "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            Sound::Link(
+                "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+                    .parse()
+                    .unwrap(),
+            ),
+        ),
+        (
+            "youtu.be/dQw4w9WgXcQ",
+            Sound::Link("https://youtu.be/dQw4w9WgXcQ".parse().unwrap()),
+        ),
+    ];
+    for (value, sound) in cases {
+        assert_eq!(party_sound(value), Some(sound), "{value}");
+    }
+}
+
+#[test]
+fn sound_is_written_back_as_one_string() {
+    for value in ["goodbye.wav", "https://youtu.be/dQw4w9WgXcQ"] {
+        let mut config = Config::default();
+        config.events.on_party.sound = party_sound(value);
+        let written = toml::to_string(&config).unwrap();
+        assert_eq!(parse(&written).unwrap(), config, "{value}");
+    }
+}

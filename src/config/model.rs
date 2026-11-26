@@ -6,8 +6,10 @@
 use std::{num::NonZeroUsize, path::PathBuf, time::Duration};
 
 use serde::{Deserialize, Serialize};
+use url::Url;
 
 use super::values::{Bitrate, Complexity, Volume};
+use crate::sources::{QueryType, parse_query};
 
 #[derive(Deserialize, Serialize, Default, Debug, Clone, PartialEq)]
 #[serde(default, deny_unknown_fields)]
@@ -48,7 +50,7 @@ impl Default for TeamspeakConfig {
 }
 
 /// Channel ID or name/path ("Parent/Channel").
-#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
+#[derive(Deserialize, Serialize, Debug, Clone, Eq, PartialEq)]
 #[serde(untagged)]
 pub enum ChannelRef {
     Id(u64),
@@ -86,92 +88,101 @@ impl Default for AudioConfig {
     }
 }
 
-#[derive(Deserialize, Serialize, Default, Debug, Clone, PartialEq)]
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
 #[serde(default, deny_unknown_fields)]
 pub struct EventsConfig {
-    pub on_connect: ConnectEvent,
+    /// The bot connected to the server, `delay` after the channel list arrived.
+    pub on_connect: Event,
     pub on_disconnect: DisconnectEvent,
-    pub on_idle: IdleEvent,
-    pub on_alone: AloneEvent,
-    pub on_party: PartyEvent,
-    pub on_song_start: SongStartEvent,
+    /// Nothing played for `delay` away from home (pause counts as idle).
+    pub on_idle: Event,
+    /// The bot alone in its channel for `delay`, away from home.
+    pub on_alone: Event,
+    /// Someone is in the bot's channel and nothing plays, after `delay`.
+    pub on_party: Event,
+    /// A new song started. Placeholders in the texts: `{title}`, `{artist}`, `{source}`.
+    pub on_song_start: Event,
 }
 
-/// Bot connected to the server.
-#[derive(Deserialize, Serialize, Default, Debug, Clone, PartialEq)]
-#[serde(default, deny_unknown_fields)]
-pub struct ConnectEvent {
-    pub message: Option<String>,
+/// Used for a missing `[events.*]` section. A written section has only the actions it lists.
+impl Default for EventsConfig {
+    fn default() -> Self {
+        let back_home = |delay| Event {
+            delay,
+            move_to: Some(Destination::Home),
+            ..Event::default()
+        };
+        Self {
+            on_connect: Event::default(),
+            on_disconnect: DisconnectEvent::default(),
+            on_idle: back_home(Duration::from_secs(10 * 60)),
+            on_alone: back_home(Duration::from_secs(60)),
+            on_party: Event::default(),
+            on_song_start: Event::default(),
+        }
+    }
 }
 
-/// Bot disconnects on shutdown.
+/// Bot disconnects on shutdown. After that nothing can be done, so it has no actions,
+/// only the reason users see.
 #[derive(Deserialize, Serialize, Default, Debug, Clone, PartialEq)]
 #[serde(default, deny_unknown_fields)]
 pub struct DisconnectEvent {
     pub message: Option<String>,
 }
 
-/// Nothing played for `delay` (pause counts as idle).
-#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
+/// What an event does, `delay` after its condition is met. Every action is optional, they
+/// run in this order: `message`, `sound` (to its end), then `move_to`, `description` and
+/// `nickname`. Validation rejects a zero `delay` where it would make the bot leave at once.
+#[derive(Deserialize, Serialize, Default, Debug, Clone, PartialEq)]
 #[serde(default, deny_unknown_fields)]
-pub struct IdleEvent {
+pub struct Event {
     #[serde(with = "humantime_serde")]
     pub delay: Duration,
-    pub sound: Option<PathBuf>,
+    /// Channel message.
     pub message: Option<String>,
-    pub return_home: bool,
+    /// Played outside the queue to its end, the remaining actions wait for it.
+    pub sound: Option<Sound>,
+    pub move_to: Option<Destination>,
+    pub description: Option<String>,
+    pub nickname: Option<String>,
 }
 
-impl Default for IdleEvent {
-    fn default() -> Self {
-        Self {
-            delay: Duration::from_secs(10 * 60),
-            sound: None,
-            message: None,
-            return_home: true,
+/// The `sound` of an event: a file, or a link the bot looks up once after starting.
+/// Written as one string, a link is told from a path the same way `!song add` does it.
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Eq)]
+#[serde(from = "String", into = "String")]
+pub enum Sound {
+    /// Relative to the config folder or absolute, anywhere on the disk: the config is
+    /// written by the admin, not by people on the chat.
+    File(PathBuf),
+    Link(Url),
+}
+
+impl From<String> for Sound {
+    fn from(text: String) -> Self {
+        match parse_query(text.trim()) {
+            QueryType::Link(url) => Sound::Link(url),
+            QueryType::Phrase(_) => Sound::File(text.into()),
         }
     }
 }
 
-/// Bot alone in its channel for `delay`.
-#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
-#[serde(default, deny_unknown_fields)]
-pub struct AloneEvent {
-    #[serde(with = "humantime_serde")]
-    pub delay: Duration,
-    pub sound: Option<PathBuf>,
-    pub message: Option<String>,
-    pub return_home: bool,
-}
-
-impl Default for AloneEvent {
-    fn default() -> Self {
-        Self {
-            delay: Duration::from_secs(60),
-            sound: None,
-            message: None,
-            return_home: true,
+impl From<Sound> for String {
+    fn from(sound: Sound) -> Self {
+        match sound {
+            Sound::File(path) => path.to_string_lossy().into_owned(),
+            Sound::Link(url) => url.into(),
         }
     }
 }
 
-/// Bot was alone and someone joined (or bot entered a channel with users).
-#[derive(Deserialize, Serialize, Default, Debug, Clone, PartialEq)]
-#[serde(default, deny_unknown_fields)]
-pub struct PartyEvent {
-    #[serde(with = "humantime_serde")]
-    pub delay: Duration,
-    /// Played before the queue.
-    pub sound: Option<PathBuf>,
-    pub message: Option<String>,
-}
-
-/// A new song started.
-#[derive(Deserialize, Serialize, Default, Debug, Clone, PartialEq)]
-#[serde(default, deny_unknown_fields)]
-pub struct SongStartEvent {
-    /// Placeholders: `{title}`, `{artist}`, `{source}`.
-    pub message: Option<String>,
+/// Where an event moves the bot: `move_to = "home"` or `move_to = { channel = 22 }`.
+#[derive(Deserialize, Serialize, Debug, Clone, Eq, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum Destination {
+    Home,
+    Channel(ChannelRef),
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]

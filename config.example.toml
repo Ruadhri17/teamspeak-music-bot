@@ -26,34 +26,45 @@ default_volume = 50                 # [live] 0-100, volume after start (logarith
 max_volume = 100                    # [live] 0-100, highest value allowed for `!bot volume`
 pause_release_after = "5m"          # [live] release the stream after being paused this long
 
-# Events. Every action is optional,
-# an event without actions does nothing.
+# Events. Each one except on_disconnect may do any of these, every action is optional
+# and an event without actions does nothing:
+#   delay        wait this long after the condition is met, default "0s"
+#   message      channel message
+#   sound        a file, or a YouTube link (looked up once after the start, and each
+#                time it plays it starts a few seconds later than a file),
+#                played outside the queue to its end
+#   move_to      "home", or { channel = 22 } / { channel = "Parent/Channel" }
+#   description  "" clears it
+#   nickname     3-30 characters
+# They run in this order, the rest waits for the end of the sound.
+# A written event section has only the actions it lists.
+# Description and nickname stay as an event set them, another event may set them back.
+# Arriving home always clears the queue. Music playing for nobody at home stops
+# after on_alone's delay.
 
 [events.on_connect]                 # bot connected to the server
-# message = "Hello!"                # [live] channel message after joining
+# message = "Hello!"                # [live]
 
-[events.on_disconnect]              # bot disconnects on shutdown
+[events.on_disconnect]              # bot disconnects on shutdown, no other actions
 # message = "See you later"         # [live] disconnect reason shown to users
 
-[events.on_idle]                    # nothing played for `delay` (pause counts as idle)
-delay = "10m"                       # [live]
-# sound = "/home/tsmusic/channel-music/goodbye.wav"   # [live]
+[events.on_idle]                    # nothing played for `delay` away from home (pause counts as idle)
+delay = "10m"                       # [live] must be more than 0
 # message = "Nothing is playing, going back home"      # [live]
-return_home = true                  # [live] go back to the home channel (after the sound)
-
-[events.on_alone]                   # bot alone in its channel for `delay`
-delay = "1m"                        # [live]
 # sound = "/home/tsmusic/channel-music/goodbye.wav"   # [live]
-# message = "..."                     # [live]
-return_home = true                  # [live]
+move_to = "home"                    # [live]
 
-[events.on_party]                   # bot was alone and someone joined / bot entered a channel with users
-delay = "0s"                        # [live]
+[events.on_alone]                   # bot alone in its channel for `delay`, away from home
+delay = "1m"                        # [live] must be more than 0
+# sound = "/home/tsmusic/channel-music/goodbye.wav"   # [live]
+move_to = "home"                    # [live]
+
+[events.on_party]                   # someone is in the bot's channel and nothing plays (not at home)
 # sound = "/home/tsmusic/channel-music/welcome.wav"   # [live] played before the queue
-# message = "..."                     # [live]
+# description = "Playing music, drag me to your channel when I am home"   # [live]
 
-[events.on_song_start]              # a new song started
-# message = "Now playing: {artist} - {title}"         # [live] {title} {artist} {source}
+[events.on_song_start]              # a new song started, texts may use {title} {artist} {source}
+# message = "Now playing: {artist} - {title}"         # [live]
 
 [queue]
 # max_len = 1000                    # [live] not set = unlimited
