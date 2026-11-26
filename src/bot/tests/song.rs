@@ -48,7 +48,7 @@ async fn finished_starts_the_next_track_and_keeps_the_buffered_end() {
     let first = h.current_stop();
     h.finish_current();
     assert_eq!(h.playing(), Some("b"));
-    assert!(!first.is_cancelled());
+    assert!(!first.is_stopped());
     assert_eq!(h.control().min_stream_id, 0);
 }
 
@@ -100,7 +100,7 @@ async fn pause_holds_the_frames() {
     assert_eq!(h.send("!song pause"), None);
     assert_eq!(h.paused(), Some("a"));
     assert!(h.control().paused);
-    assert!(!h.current_stop().is_cancelled());
+    assert!(!h.current_stop().is_stopped());
 }
 
 #[tokio::test]
@@ -175,7 +175,7 @@ async fn next_cancels_the_track_and_drops_its_frames() {
     let old_stop = h.current_stop();
     assert_eq!(h.send("!song next"), None);
     assert_eq!(h.playing(), Some("b"));
-    assert!(old_stop.is_cancelled());
+    assert!(old_stop.is_stopped());
     assert!(h.control().min_stream_id > old_id.0);
     assert!(h.control().min_stream_id <= h.current_id().0);
 }
@@ -188,7 +188,7 @@ async fn next_with_an_empty_queue_stops() {
     let old_stop = h.current_stop();
     assert_eq!(h.send("!song next"), None);
     assert!(h.is_idle());
-    assert!(old_stop.is_cancelled());
+    assert!(old_stop.is_stopped());
     assert!(h.control().min_stream_id > old_id.0);
 }
 

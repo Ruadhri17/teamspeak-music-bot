@@ -1,8 +1,6 @@
 //! Player state and playback IDs.
 
-use tokio_util::sync::CancellationToken;
-
-use crate::sources::TrackRef;
+use crate::{process::Stopper, sources::TrackRef};
 
 /// Identifies one playback, so a late "finished" from an old track can be told apart.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -20,7 +18,7 @@ pub(crate) struct Ended {
 #[derive(Debug)]
 pub(super) struct Playback {
     pub(super) id: PlaybackId,
-    pub(super) stop: CancellationToken,
+    pub(super) stop: Stopper,
     pub(super) track: TrackRef,
     pub(super) kind: Kind,
 }

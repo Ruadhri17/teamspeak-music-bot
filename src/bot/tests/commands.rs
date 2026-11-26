@@ -97,7 +97,7 @@ async fn queue_clear_stops_everything() {
     assert_eq!(h.send("!queue clear"), None);
     assert!(h.is_idle());
     assert!(h.queued().is_empty());
-    assert!(stop.is_cancelled());
+    assert!(stop.is_stopped());
     assert!(h.control().min_stream_id > id.0);
 }
 

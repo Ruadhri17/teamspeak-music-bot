@@ -1,7 +1,7 @@
 //! Player: plays tracks and keeps the queue. Knows nothing about the chat or TeamSpeak,
 //! the bot calls its methods and turns the results into replies.
 //!
-//! Every playback has a `PlaybackId` and a `CancellationToken`. Results with a stale ID are dropped.
+//! Every playback has a `PlaybackId` and a `Stopper`. Results with a stale ID are dropped.
 //!
 //! - `mod.rs`: `Player`, its errors and what it reports
 //! - `launcher`: `Launcher`, the interface to the audio thread
@@ -188,7 +188,7 @@ impl Player {
         self.state.playback().expect("a track plays").id
     }
 
-    pub(crate) fn current_stop(&self) -> tokio_util::sync::CancellationToken {
+    pub(crate) fn current_stop(&self) -> crate::process::Stopper {
         self.state.playback().expect("a track plays").stop.clone()
     }
 

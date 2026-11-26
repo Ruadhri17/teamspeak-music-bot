@@ -85,6 +85,9 @@ pub struct Client {
     output: Output,
     /// A frame went out since the last end-of-speech packet.
     talking: bool,
+    /// The oldest frame still to send, taken out of the channel while nothing is sent
+    /// (a pause, a reconnect) so the frames of stopped tracks behind it can be dropped.
+    held: Option<Frame>,
     /// Where an identity upgraded by tsclientlib is saved.
     identity_path: PathBuf,
     /// `home_channel` from the config, `None` = the server's default channel.
@@ -127,6 +130,7 @@ impl Client {
             output: Output::new(config.audio.bitrate, config.audio.complexity)
                 .map_err(TeamspeakError::Encoder)?,
             talking: false,
+            held: None,
             identity_path,
             home_config: config.teamspeak.home_channel.clone(),
             home: None,
@@ -388,34 +392,37 @@ impl Client {
     /// Sends one frame, called every `FRAME_DURATION`.
     fn send_frame(&mut self) {
         let control = *self.control.borrow();
-        // While tsclientlib reconnects, frames wait in the channel like during a pause,
-        // `send_audio` would fail for every one of them.
+        let frame = self.next_frame(control.min_stream_id);
+        // While tsclientlib reconnects, frames wait like during a pause, `send_audio` would
+        // fail for every one of them. The frame is kept, the stopped ones are already gone:
+        // their audio threads, blocked on the full channel, can see the stop and end.
         if control.paused || self.home.is_none() {
+            self.held = frame;
             self.end_speech();
             return;
         }
-
-        loop {
-            match self.frames.try_recv() {
-                // A stopped track, its frames left in the channel are dropped.
-                Ok(frame) if frame.stream < control.min_stream_id => continue,
-                Ok(mut frame) => {
-                    match self.output.encode(&mut frame.pcm, control.volume) {
-                        Ok(data) => {
-                            self.send_audio(&data);
-                            self.talking = true;
-                        }
-                        // One lost frame is a short gap, listeners conceal it.
-                        Err(err) => warn!("Opus could not encode a frame: {err}"),
-                    }
-                    return;
-                }
-                Err(_) => {
-                    self.end_speech();
-                    return;
-                }
+        let Some(mut frame) = frame else {
+            self.end_speech();
+            return;
+        };
+        match self.output.encode(&mut frame.pcm, control.volume) {
+            Ok(data) => {
+                self.send_audio(&data);
+                self.talking = true;
             }
+            // One lost frame is a short gap, listeners conceal it.
+            Err(err) => warn!("Opus could not encode a frame: {err}"),
         }
+    }
+
+    /// The oldest frame of a track that still plays. Frames of stopped tracks (a stream ID
+    /// below `min_stream_id`) are dropped on the way.
+    fn next_frame(&mut self, min_stream_id: u64) -> Option<Frame> {
+        self.held
+            .take()
+            .into_iter()
+            .chain(std::iter::from_fn(|| self.frames.try_recv().ok()))
+            .find(|frame| frame.stream >= min_stream_id)
     }
 
     /// Sends the end-of-speech packet once after the last frame.

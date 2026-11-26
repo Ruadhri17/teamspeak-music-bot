@@ -2,7 +2,6 @@ use std::{fs, num::NonZeroUsize, os::unix::fs::PermissionsExt, path::Path};
 
 use tempfile::TempDir;
 use tokio::sync::{mpsc, watch};
-use tokio_util::sync::CancellationToken;
 
 use crate::{
     audio::{AudioInput, PlayResult},
@@ -11,6 +10,7 @@ use crate::{
     events::Action,
     permissions::Role,
     player::{Ended, Launcher, PlaybackId},
+    process::Stopper,
     teamspeak::{AudioControl, Author, CurrentChannel, ReplyTo, TeamspeakEvent, TeamspeakRequest},
 };
 
@@ -21,7 +21,7 @@ impl Launcher for FakeLauncher {
         &mut self,
         _input: AudioInput,
         _stream: u64,
-        _stop: CancellationToken,
+        _stop: Stopper,
         _on_done: Box<dyn FnOnce(PlayResult) + Send>,
     ) {
     }
@@ -178,7 +178,7 @@ impl Harness {
         self.bot.player.current_id()
     }
 
-    pub fn current_stop(&self) -> CancellationToken {
+    pub fn current_stop(&self) -> Stopper {
         self.bot.player.current_stop()
     }
 

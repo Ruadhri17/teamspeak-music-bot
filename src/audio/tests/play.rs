@@ -8,9 +8,11 @@ use std::{
 };
 
 use tokio::sync::mpsc;
-use tokio_util::sync::CancellationToken;
 
-use crate::audio::{AudioError, AudioInput, DoneGuard, Frame, PlayResult, play};
+use crate::{
+    audio::{AudioError, AudioInput, DoneGuard, Frame, PlayResult, play},
+    process::Stopper,
+};
 
 const TIMEOUT: Duration = Duration::from_secs(20);
 
@@ -29,13 +31,13 @@ fn sine(dir: &tempfile::TempDir, seconds: u32) -> AudioInput {
 struct Run {
     frames: mpsc::Receiver<Frame>,
     done: std_mpsc::Receiver<PlayResult>,
-    stop: CancellationToken,
+    stop: Stopper,
 }
 
 fn start(ffmpeg: &str, input: AudioInput, capacity: usize) -> Run {
     let (frames_tx, frames) = mpsc::channel(capacity);
     let (done_tx, done) = std_mpsc::channel();
-    let stop = CancellationToken::new();
+    let stop = Stopper::new();
     play(
         PathBuf::from(ffmpeg),
         input,
@@ -92,7 +94,7 @@ fn stop_reports_ok() {
     let dir = tempfile::tempdir().unwrap();
     let mut run = start("ffmpeg", sine(&dir, 30), 1);
     run.frames.blocking_recv().unwrap();
-    run.stop.cancel();
+    run.stop.stop();
     run.frames.blocking_recv();
     let result = run.done.recv_timeout(TIMEOUT).unwrap();
     assert!(result.is_ok(), "{result:?}");
@@ -126,4 +128,20 @@ fn guard_finish_reports_once() {
     guard.finish(Ok(()));
     assert!(matches!(done.try_recv(), Ok(Ok(()))));
     assert!(done.try_recv().is_err());
+}
+
+#[test]
+fn stop_frees_a_playback_whose_input_sends_nothing() {
+    let (reader, writer) = std::os::unix::net::UnixStream::pair().unwrap();
+    let run = start("ffmpeg", AudioInput::Stream(Box::new(reader)), 1);
+    std::thread::sleep(Duration::from_millis(200));
+    let start = std::time::Instant::now();
+    run.stop.stop();
+    let result = run
+        .done
+        .recv_timeout(Duration::from_secs(3))
+        .expect("the stopped playback ends at once");
+    assert!(result.is_ok(), "{result:?}");
+    assert!(start.elapsed() < Duration::from_secs(2));
+    drop(writer);
 }

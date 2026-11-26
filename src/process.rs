@@ -3,16 +3,23 @@
 //!
 //! `yt-dlp` built with PyInstaller unpacks itself into `/tmp/_MEI*` and removes the directory
 //! only when it exits on its own or on SIGTERM. SIGKILL leaves about 85 MB behind every time.
+//!
+//! - `stop`: stop one `std` child and reap it
+//! - `Stopper`: stop the processes of one playback from another thread
+//! - `TermOnDrop`: a tokio child that is stopped when it is dropped
 
 use std::{
     io,
+    os::fd::OwnedFd,
     process::Output,
+    sync::{Arc, Mutex, MutexGuard, PoisonError},
     thread,
     time::{Duration, Instant},
 };
 
-use rustix::process::{Pid, Signal, kill_process};
+use rustix::process::{Pid, PidfdFlags, Signal, kill_process, pidfd_open, pidfd_send_signal};
 use tokio::{io::AsyncReadExt, process::Child};
+use tracing::warn;
 
 /// How long a process gets to exit after SIGTERM.
 pub const STOP_GRACE: Duration = if cfg!(test) {
@@ -40,6 +47,67 @@ pub fn stop(child: &mut std::process::Child) {
     }
     let _ = child.kill();
     let _ = child.wait();
+}
+
+/// Stops one playback from any thread: sets a flag its threads check, and signals its
+/// processes at once. A thread blocked reading from a stalled process is freed too, which
+/// a flag alone cannot do. Clones share the same state.
+#[derive(Clone, Debug, Default)]
+pub struct Stopper(Arc<Mutex<Stopping>>);
+
+#[derive(Debug, Default)]
+struct Stopping {
+    stopped: bool,
+    /// Each process with the signal it gets. A pidfd keeps pointing at the same process,
+    /// so a signal sent after the process was reaped cannot hit another one with the
+    /// reused PID: it fails instead.
+    processes: Vec<(OwnedFd, Signal)>,
+}
+
+impl Stopper {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Sets the flag and signals every watched process. Processes that already exited
+    /// are skipped. Only short system calls under the lock, safe to call from async code.
+    pub fn stop(&self) {
+        let mut stopping = self.lock();
+        stopping.stopped = true;
+        for (pidfd, signal) in &stopping.processes {
+            let _ = pidfd_send_signal(pidfd, *signal);
+        }
+    }
+
+    pub fn is_stopped(&self) -> bool {
+        self.lock().stopped
+    }
+
+    /// Signals `child` with `signal` when the playback stops, at once if it already has.
+    /// Call right after spawning, while the child cannot have been reaped yet.
+    pub fn watch(&self, child: &std::process::Child, signal: Signal) {
+        // Fails only on kernels older than 5.3, the process then dies with the end of the
+        // track instead of at once.
+        let pidfd = match pidfd_open(Pid::from_child(child), PidfdFlags::empty()) {
+            Ok(pidfd) => pidfd,
+            Err(err) => {
+                warn!("cannot watch process {}: {err}", child.id());
+                return;
+            }
+        };
+        let mut stopping = self.lock();
+        if stopping.stopped {
+            let _ = pidfd_send_signal(&pidfd, signal);
+        } else {
+            stopping.processes.push((pidfd, signal));
+        }
+    }
+
+    /// A panic while holding the lock cannot leave the state half changed, so a poisoned
+    /// lock is used as it is.
+    fn lock(&self) -> MutexGuard<'_, Stopping> {
+        self.0.lock().unwrap_or_else(PoisonError::into_inner)
+    }
 }
 
 /// A tokio child process that is stopped with `stop` semantics when dropped, for example
@@ -285,5 +353,63 @@ while :; do sleep 0.05; done"#;
         tokio::task::spawn_blocking(move || wait_for(|| exists(&term_file)))
             .await
             .unwrap();
+    }
+
+    fn sleeper() -> std::process::Child {
+        Command::new("sleep")
+            .arg("30")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .spawn()
+            .unwrap()
+    }
+
+    fn ended_by(child: &mut std::process::Child, signal: Signal) -> bool {
+        let start = Instant::now();
+        loop {
+            if let Some(status) = child.try_wait().unwrap() {
+                return status.signal() == Some(signal.as_raw());
+            }
+            if start.elapsed() > Duration::from_secs(5) {
+                return false;
+            }
+            thread::sleep(POLL_INTERVAL);
+        }
+    }
+
+    #[test]
+    fn stopper_signals_watched_processes() {
+        let stopper = Stopper::new();
+        let mut killed = sleeper();
+        let mut terminated = sleeper();
+        stopper.watch(&killed, Signal::KILL);
+        stopper.watch(&terminated, Signal::TERM);
+        assert!(!stopper.is_stopped());
+        assert!(is_running(killed.id()));
+
+        stopper.clone().stop();
+        assert!(stopper.is_stopped());
+        assert!(ended_by(&mut killed, Signal::KILL));
+        assert!(ended_by(&mut terminated, Signal::TERM));
+    }
+
+    #[test]
+    fn a_process_watched_after_the_stop_is_signalled_at_once() {
+        let stopper = Stopper::new();
+        stopper.stop();
+        let mut child = sleeper();
+        stopper.watch(&child, Signal::KILL);
+        assert!(ended_by(&mut child, Signal::KILL));
+    }
+
+    #[test]
+    fn stopping_after_the_process_was_reaped_is_harmless() {
+        let stopper = Stopper::new();
+        let mut child = Command::new("true").spawn().unwrap();
+        stopper.watch(&child, Signal::KILL);
+        assert!(child.wait().unwrap().success());
+        stopper.stop();
+        stopper.stop();
+        assert!(stopper.is_stopped());
     }
 }

@@ -23,8 +23,10 @@ use std::{
     time::Duration,
 };
 
+use rustix::process::Signal;
 use tokio::sync::mpsc;
-use tokio_util::sync::CancellationToken;
+
+use crate::process::Stopper;
 
 pub(crate) use decoder::{Decoder, read_tail};
 pub use output::Output;
@@ -37,7 +39,6 @@ pub const FRAME_DURATION: Duration = Duration::from_millis(20);
 pub const SAMPLES_PER_CHANNEL: usize = SAMPLE_RATE * FRAME_DURATION.as_millis() as usize / 1000;
 /// One frame, interleaved (left, right, left, ...).
 pub const FRAME_SAMPLES: usize = SAMPLES_PER_CHANNEL * CHANNELS;
-
 /// Audio data from any source, always given to ffmpeg on its stdin, never as a path or URL.
 pub enum AudioInput {
     /// A seekable file, becomes ffmpeg's stdin directly. Seeking is needed by formats
@@ -78,21 +79,21 @@ pub struct Frame {
 }
 
 /// Plays `input` on a new thread, pushing PCM frames tagged with `stream` into `frames`
-/// until the track ends, `stop` is cancelled or the receiver is gone.
+/// until the track ends, `stop` is stopped or the receiver is gone.
 /// Then the thread calls `on_done` with the result, also when it panics.
 pub fn play(
     ffmpeg_path: PathBuf,
     input: AudioInput,
     stream: u64,
     frames: mpsc::Sender<Frame>,
-    stop: CancellationToken,
+    stop: Stopper,
     on_done: impl FnOnce(PlayResult) + Send + 'static,
 ) -> JoinHandle<()> {
     std::thread::spawn(move || {
         let done = DoneGuard(Some(on_done));
         let result = decode(&ffmpeg_path, input, stream, &frames, &stop);
         // A stopped track fails to read once ffmpeg is killed, that is not an error.
-        done.finish(if stop.is_cancelled() { Ok(()) } else { result });
+        done.finish(if stop.is_stopped() { Ok(()) } else { result });
     })
 }
 
@@ -101,11 +102,13 @@ fn decode(
     input: AudioInput,
     stream: u64,
     frames: &mpsc::Sender<Frame>,
-    stop: &CancellationToken,
+    stop: &Stopper,
 ) -> PlayResult {
     let mut decoder = Decoder::spawn(ffmpeg_path, input).map_err(AudioError::Spawn)?;
+    // Killed from outside on a stop, so a read blocked by a stalled input ends at once.
+    stop.watch(decoder.process(), Signal::KILL);
     while let Some(pcm) = decoder.read_frame().map_err(AudioError::Output)? {
-        if stop.is_cancelled() {
+        if stop.is_stopped() {
             return Ok(());
         }
         let frame = Frame {
@@ -116,6 +119,11 @@ fn decode(
         if frames.blocking_send(frame).is_err() {
             return Ok(());
         }
+    }
+    // Killed by a stop: the end of the output is not the end of the track, and the input
+    // thread may still wait for a stalled source, so it is not joined.
+    if stop.is_stopped() {
+        return Ok(());
     }
     decoder.finish()
 }

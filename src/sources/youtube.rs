@@ -9,6 +9,7 @@ use std::{
     time::Duration,
 };
 
+use rustix::process::Signal;
 use serde::Deserialize;
 use tokio::process::Command;
 use tracing::{debug, warn};
@@ -17,7 +18,7 @@ use url::Url;
 use crate::{
     audio::{AudioInput, read_tail},
     config::YoutubeConfig,
-    process::{self, TermOnDrop},
+    process::{self, Stopper, TermOnDrop},
     sources::{Found, Location, Playlist, QueryType, TrackRef},
 };
 
@@ -26,6 +27,9 @@ const YT_PLAYLIST_URL: &str = "https://www.youtube.com/playlist?list=";
 const LOOKUP_TIMEOUT: Duration = Duration::from_secs(20);
 /// The first with the preferred clients, the rest with the `yt-dlp` defaults.
 const OPEN_ATTEMPTS: u32 = 3;
+/// Seconds `yt-dlp` waits for a silent connection while streaming before it gives up,
+/// so a stalled stream ends (and is retried or fails) instead of playing silence forever.
+const STREAM_SOCKET_TIMEOUT: &str = "20";
 
 /// Never contains the rejected text, the message may go to the chat.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
@@ -355,8 +359,13 @@ pub(super) fn parse_output(json: &[u8]) -> Result<Found, YoutubeError> {
 ///
 /// `std::process`, not tokio: the audio side reads it with a plain `Read` on its own thread.
 /// Starts with `player_clients`, retries with the `yt-dlp` defaults while no audio has come.
-pub fn open(config: &YoutubeConfig, id: &VideoId) -> Result<AudioInput, YoutubeError> {
-    start(config, id, Clients::Preferred, OPEN_ATTEMPTS)
+/// `stop` ends the processes at once and prevents retries.
+pub fn open(
+    config: &YoutubeConfig,
+    id: &VideoId,
+    stop: &Stopper,
+) -> Result<AudioInput, YoutubeError> {
+    start(config, id, Clients::Preferred, OPEN_ATTEMPTS, stop.clone())
 }
 
 /// One attempt with the given clients, no retry. For `yt-check`, which tests each path on its own.
@@ -365,7 +374,7 @@ pub fn open_with(
     id: &VideoId,
     clients: Clients,
 ) -> Result<AudioInput, YoutubeError> {
-    start(config, id, clients, 1)
+    start(config, id, clients, 1, Stopper::new())
 }
 
 /// Spawns the first `yt-dlp`, the reader spawns the rest, up to `attempts` in total.
@@ -374,18 +383,20 @@ fn start(
     id: &VideoId,
     clients: Clients,
     attempts: u32,
+    stop: Stopper,
 ) -> Result<AudioInput, YoutubeError> {
     let stream = Stream {
         config: config.clone(),
         url: id.url(),
     };
-    let running = stream.spawn(clients).map_err(YoutubeError::Spawn)?;
+    let running = stream.spawn(clients, &stop).map_err(YoutubeError::Spawn)?;
     Ok(AudioInput::Stream(Box::new(ChildReader {
         stream,
         attempt: 1,
         attempts,
         started: false,
         running,
+        stop,
     })))
 }
 
@@ -400,12 +411,15 @@ impl Stream {
     /// audio-only format for a client (seen with `visionos` on videos for kids), then a
     /// format with video up to 360p, the decoder skips the video. Its AAC is close to
     /// the audio-only formats, a higher resolution would only cost bandwidth.
-    fn spawn(&self, clients: Clients) -> io::Result<Running> {
+    /// The process is watched by `stop`: SIGTERM, so `yt-dlp` still cleans up after itself.
+    fn spawn(&self, clients: Clients, stop: &Stopper) -> io::Result<Running> {
         let mut child = yt_dlp_command(&self.config, clients)
             .args([
                 "--no-playlist",
                 "--quiet",
                 "--no-progress",
+                "--socket-timeout",
+                STREAM_SOCKET_TIMEOUT,
                 "--format",
                 "bestaudio[ext=webm]/bestaudio/best[height<=360]",
                 "--output",
@@ -417,6 +431,7 @@ impl Stream {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()?;
+        stop.watch(&child, Signal::TERM);
 
         // Both are `Some`, they were set to `piped` above.
         let stdout = child.stdout.take().expect("stdout is piped");
@@ -444,6 +459,8 @@ struct ChildReader {
     attempts: u32,
     started: bool,
     running: Running,
+    /// A stopped playback signalled the process, its end is no failure and is not retried.
+    stop: Stopper,
 }
 
 impl Read for ChildReader {
@@ -453,6 +470,9 @@ impl Read for ChildReader {
             if n > 0 || buf.is_empty() {
                 self.started |= n > 0;
                 return Ok(n);
+            }
+            if self.stop.is_stopped() {
+                return Ok(0);
             }
             match self.running.finish() {
                 Ok(()) => return Ok(0),
@@ -465,7 +485,7 @@ impl Read for ChildReader {
                         self.attempt, self.attempts
                     );
                     // The old process has exited, replacing it reaps it in `Drop`.
-                    self.running = self.stream.spawn(Clients::Default)?;
+                    self.running = self.stream.spawn(Clients::Default, &self.stop)?;
                 }
                 Err(failure) => return Err(failure.into()),
             }

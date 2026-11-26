@@ -3,7 +3,6 @@
 
 use std::{fs::File, mem};
 
-use tokio_util::sync::CancellationToken;
 use tracing::warn;
 
 use super::{
@@ -13,6 +12,7 @@ use super::{
 use crate::{
     audio::{AudioError, AudioInput},
     config::Volume,
+    process::Stopper,
     sources::{
         Location, TrackRef, local, music_dir,
         youtube::{self, YoutubeError},
@@ -86,9 +86,10 @@ impl Player {
     /// Plays the sound of an event outside the queue, in place of whatever plays or is
     /// paused. `Err` is for the log: the file or link could not be opened, nothing changed.
     pub fn play_sound(&mut self, sound: TrackRef) -> Result<(), String> {
-        let input = self.open(&sound.location)?;
+        let stop = Stopper::new();
+        let input = self.open(&sound.location, &stop)?;
         self.stop_current();
-        self.start(input, sound, Kind::Sound);
+        self.start(input, sound, Kind::Sound, stop);
         Ok(())
     }
 
@@ -99,10 +100,11 @@ impl Player {
         }
     }
 
-    /// Stops the current track at once, drops its buffered frames and unpauses the client.
+    /// Stops the current track at once (its processes too), drops its buffered frames and
+    /// unpauses the client.
     pub(super) fn stop_current(&mut self) {
         if let Some(playback) = self.state.playback() {
-            playback.stop.cancel();
+            playback.stop.stop();
             if playback.kind == Kind::Sound {
                 self.notices.push(Notice::SoundInterrupted);
             }
@@ -156,9 +158,10 @@ impl Player {
     /// and stays idle when the queue runs out.
     fn play_next(&mut self) {
         while let Some(track) = self.queue.pop_next() {
-            match self.open(&track.location) {
+            let stop = Stopper::new();
+            match self.open(&track.location, &stop) {
                 Ok(input) => {
-                    self.start(input, track, Kind::Track);
+                    self.start(input, track, Kind::Track, stop);
                     return;
                 }
                 Err(reason) => {
@@ -172,10 +175,10 @@ impl Player {
         }
     }
 
-    /// Starts `input` through the launcher. The player must be idle.
-    fn start(&mut self, input: AudioInput, track: TrackRef, kind: Kind) {
+    /// Starts `input` through the launcher. The player must be idle. `stop` is the one
+    /// `input` was opened with, so stopping the playback stops its processes too.
+    fn start(&mut self, input: AudioInput, track: TrackRef, kind: Kind, stop: Stopper) {
         let id = self.new_id();
-        let stop = CancellationToken::new();
         let done = self.done_tx.clone();
         let title = track.title.clone();
         // A track that finished while paused leaves the client paused, unpause for the new one.
@@ -216,14 +219,15 @@ impl Player {
         Ok(())
     }
 
-    /// Opens a track right before playing it. `Err` is safe to show on the chat.
-    fn open(&self, location: &Location) -> Result<AudioInput, String> {
+    /// Opens a track right before playing it. Processes it starts are stopped by `stop`.
+    /// `Err` is safe to show on the chat.
+    fn open(&self, location: &Location, stop: &Stopper) -> Result<AudioInput, String> {
         match location {
             Location::Local(path) => {
                 local::open(music_dir(&self.sources)?, path).map_err(|err| err.to_string())
             }
             Location::Youtube(id) => {
-                youtube::open(&self.sources.youtube, id).map_err(|err| err.to_string())
+                youtube::open(&self.sources.youtube, id, stop).map_err(|err| err.to_string())
             }
             // Only event sounds from the config are files, their errors go to the log, where
             // the path helps the admin.

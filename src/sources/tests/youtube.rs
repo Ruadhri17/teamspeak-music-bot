@@ -13,6 +13,7 @@ use url::Url;
 use crate::{
     audio::AudioInput,
     config::YoutubeConfig,
+    process::Stopper,
     sources::{
         Location, Playlist, QueryType, TrackRef,
         youtube::{
@@ -498,7 +499,7 @@ fn open_stream(yt_dlp: &Path) -> Box<dyn Read + Send> {
 
 fn open_config(config: &YoutubeConfig) -> Box<dyn Read + Send> {
     let id = "5NV6Rdv1a3I".parse().unwrap();
-    match open(config, &id).unwrap() {
+    match open(config, &id, &Stopper::new()).unwrap() {
         AudioInput::Stream(reader) => reader,
         AudioInput::File(_) => panic!("expected a stream"),
     }
@@ -561,7 +562,11 @@ fn dropping_the_stream_kills_yt_dlp() {
 #[test]
 fn missing_yt_dlp_cannot_be_opened() {
     let id = "5NV6Rdv1a3I".parse().unwrap();
-    let result = open(&config(Path::new("/nonexistent/yt-dlp")), &id);
+    let result = open(
+        &config(Path::new("/nonexistent/yt-dlp")),
+        &id,
+        &Stopper::new(),
+    );
     assert!(matches!(result, Err(YoutubeError::Spawn(_))));
 }
 
@@ -889,4 +894,29 @@ async fn real_age_restricted_video_is_recognised() {
         matches!(result, Err(YoutubeError::AgeRestricted)),
         "{result:?}"
     );
+}
+
+#[test]
+fn a_stopped_stream_ends_at_once_and_is_not_retried() {
+    let (dir, yt_dlp) = fake_yt_dlp(
+        r#"echo run >> "$(dirname "$0")/runs"
+exec sleep 30"#,
+    );
+    let stop = Stopper::new();
+    let id = "5NV6Rdv1a3I".parse().unwrap();
+    let AudioInput::Stream(mut reader) = open(&config(&yt_dlp), &id, &stop).unwrap() else {
+        panic!("expected a stream");
+    };
+    let reading = std::thread::spawn(move || {
+        let mut buf = [0u8; 16];
+        reader.read(&mut buf)
+    });
+    std::thread::sleep(Duration::from_millis(200));
+    let start = Instant::now();
+    stop.stop();
+    let read = reading.join().unwrap();
+    assert_eq!(read.unwrap(), 0);
+    assert!(start.elapsed() < Duration::from_secs(2));
+    let runs = fs::read_to_string(dir.path().join("runs")).unwrap();
+    assert_eq!(runs.lines().count(), 1, "{runs}");
 }

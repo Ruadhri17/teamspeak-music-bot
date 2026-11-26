@@ -1,7 +1,8 @@
 //! Decoder: ffmpeg as a child process.
 //!
 //! Input always via stdin (`-i pipe:0`), never a URL in the arguments.
-//! Output: `-f f32le -ac 2 -ar 48000 pipe:1`. Cancelling kills the process.
+//! Output: `-f f32le -ac 2 -ar 48000 pipe:1`. A stopped playback kills the process from
+//! outside (`process::Stopper`), `Drop` kills it too and reaps it.
 
 use std::{
     io::{self, Read},
@@ -86,6 +87,11 @@ impl Decoder {
             stderr: Some(stderr),
             frames: 0,
         })
+    }
+
+    /// The ffmpeg process, for `Stopper::watch`.
+    pub fn process(&self) -> &Child {
+        &self.child
     }
 
     /// Next 20 ms of audio, `None` at the end of the output.
