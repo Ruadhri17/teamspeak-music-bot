@@ -2,6 +2,8 @@
 name = "teamspeak-music-bot"
 version = "0.1.0"
 edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/Ruadhri17/teamspeak-music-bot"
 
 [[bin]]
 name = "tsmusic"
