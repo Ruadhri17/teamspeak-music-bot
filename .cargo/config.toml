@@ -1,0 +1,8 @@
+[env]
+# audiopus_sys builds Opus from source and links it into the binary (with its `static`
+# feature from Cargo.toml). pkg-config would pick the shared system library instead, and a
+# release would not start where libopus is not installed.
+LIBOPUS_NO_PKG = "1"
+# The bundled Opus asks for CMake 3.1, CMake 4 refuses anything below 3.5 without this.
+# Older CMake ignores it.
+CMAKE_POLICY_VERSION_MINIMUM = "3.5"
