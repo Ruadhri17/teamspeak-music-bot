@@ -2,6 +2,14 @@
 
 For the administrator of the server the bot runs on. The bot runs on Linux, on x86_64 or aarch64.
 
+| Runtime dependency | Version | Check with |
+| --- | --- | --- |
+| glibc | 2.35 or newer | `ldd --version` |
+| ffmpeg | 6.0 or newer, for local files and event sounds | `ffmpeg -version` |
+| Python | 3.11 or newer, for yt-dlp | `python3 --version` |
+
+Setup installs ffmpeg and Python from the package manager, so the versions of your system's packages count.
+
 ## Quick install
 
 ```sh

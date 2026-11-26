@@ -46,8 +46,8 @@ The script downloads the latest release, checks its SHA-256 sum and starts `tsmu
 
 | | |
 | --- | --- |
-| **System** | Linux on x86_64 or aarch64 with glibc 2.35 or newer: Debian 12, Ubuntu 22.04, Fedora, Arch and newer |
-| **Installed by setup** | ffmpeg (from apt, dnf or pacman), yt-dlp and deno (from their GitHub releases), python3 for yt-dlp |
+| **System** | Linux on x86_64 or aarch64, glibc 2.35 or newer |
+| **Runtime dependencies** | ffmpeg 6.0 or newer, yt-dlp with Python 3.11 or newer, deno. Setup installs them: ffmpeg and Python from apt, dnf or pacman, so the system's packages must be new enough, yt-dlp and deno from their GitHub releases |
 | **Service** | systemd. Without it the bot runs in the foreground with `tsmusic --config <file> run` |
 | **TeamSpeak server** | TeamSpeak 3, people may use TeamSpeak 3 or 6 clients. The bot's server group needs `b_client_modify_own_description` to set its description, and should be permanent (`b_group_is_permanent`), or the bot loses it on every reconnect |
 | **Sources** | YouTube and local files |

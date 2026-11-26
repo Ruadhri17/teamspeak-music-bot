@@ -15,7 +15,7 @@ The workflow then:
 
 1. runs CI again on the tagged commit,
 2. stops when the tag is not `v` plus the version in `Cargo.toml`,
-3. builds `tsmusic-x86_64-unknown-linux-gnu` and `tsmusic-aarch64-unknown-linux-gnu` on Ubuntu 22.04 (glibc 2.35, so the bot runs on Debian 12, Ubuntu 22.04 and newer), with opus built in,
+3. builds `tsmusic-x86_64-unknown-linux-gnu` and `tsmusic-aarch64-unknown-linux-gnu` on Ubuntu 22.04, so they need glibc 2.35 at most (the other requirements are in [install.md](install.md)), with opus built in,
 4. writes `THIRD_PARTY_LICENSES.txt`, the notices of every crate built into the binary (MIT and the BSD licenses require them in a binary distribution, `just licenses` writes the same file locally),
 5. publishes the release with both binaries, the notices, `SHA256SUMS` and notes generated from the changes since the previous tag.
 
@@ -35,4 +35,4 @@ A published release is not replaced, a second run for the same tag fails. Delete
 ## Requirements
 
 - The repository is public: `install.sh` downloads the script, the binaries and the sums without logging in.
-- The runners `ubuntu-22.04` and `ubuntu-22.04-arm` exist. When GitHub retires Ubuntu 22.04, the build moves to the next runner, and the oldest supported system moves with it.
+- The runners `ubuntu-22.04` and `ubuntu-22.04-arm` exist. When GitHub retires Ubuntu 22.04, the build moves to the next runner and the glibc requirement in the docs rises with it.
