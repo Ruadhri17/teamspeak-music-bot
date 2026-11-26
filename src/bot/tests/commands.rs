@@ -239,3 +239,23 @@ async fn volume_does_not_touch_playback() {
     assert_eq!(h.current_id(), stream);
     assert!(!h.control().paused);
 }
+
+#[tokio::test]
+async fn queue_show_fits_long_titles_into_one_message() {
+    let mut h = Harness::new();
+    let names: Vec<String> = (0..17)
+        .map(|n| format!("{n:02} {}", "Very Long Title [Official Video] ".repeat(4)))
+        .collect();
+    for name in &names {
+        std::fs::write(h.dir.path().join(format!("{name}.mp3")), b"audio").unwrap();
+    }
+    let files: Vec<String> = names.iter().map(|name| format!("{name}.mp3")).collect();
+    let files: Vec<&str> = files.iter().map(String::as_str).collect();
+    h.add(&files).await;
+    let text = h.send("!queue show").unwrap();
+    assert!(text.len() <= crate::chat::MAX_MESSAGE_LEN, "{}", text.len());
+    assert!(text.starts_with("Now: 00 Very Long"), "{text}");
+    assert!(text.contains("15. 15 Very Long"), "{text}");
+    assert!(text.ends_with("page 1/2"), "{text}");
+    assert!(text.lines().all(|line| line.chars().count() < 70), "{text}");
+}

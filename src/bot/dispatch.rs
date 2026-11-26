@@ -10,8 +10,12 @@ use crate::{
     chat,
     commands::Command,
     permissions::{self, Role},
+    sources::TrackRef,
     teamspeak::{Author, ReplyTo, TeamspeakRequest},
 };
+
+/// The longest title in `!queue show`: 15 entries of this length fit in one message.
+const QUEUE_TITLE_LEN: usize = 50;
 
 impl Bot {
     /// Parses a chat message, checks the author's permissions and runs the command.
@@ -104,27 +108,29 @@ impl Bot {
         }
     }
 
-    /// `!queue show [page]`. Always replies (informational command).
-    // TODO: TS3 messages are limited to about 1024 characters, long titles need cutting.
+    /// `!queue show [page]`. Always replies (informational command), in one message:
+    /// titles are cut so a full page fits, lines that still do not fit become an ellipsis.
     fn queue_show(&self, page: NonZeroUsize) -> String {
         let Some(page) = self.player.queue_page(page, self.page_size) else {
             return "no such page, the queue is shorter".to_string();
         };
+        // Cut before escaping, see `chat::shorten`.
+        let title = |track: &TrackRef| {
+            chat::escape(&chat::shorten(&track.title, QUEUE_TITLE_LEN)).into_owned()
+        };
 
         let mut lines = Vec::new();
         if let Some(current) = self.player.current() {
-            lines.push(format!("Now: {}", chat::escape(&current.track.title)));
+            lines.push(format!("Now: {}", title(current.track)));
         }
         if page.entries.is_empty() {
             lines.push("the queue is empty".to_string());
         }
         for (position, track) in &page.entries {
-            lines.push(format!("{position}. {}", chat::escape(&track.title)));
+            lines.push(format!("{position}. {}", title(track)));
         }
-        if page.count > 1 {
-            lines.push(format!("page {}/{}", page.number, page.count));
-        }
-        lines.join("\n")
+        let footer = (page.count > 1).then(|| format!("page {}/{}", page.number, page.count));
+        chat::message(lines, footer)
     }
 
     /// `!queue clear`. Empties the queue, stops the current track and cancels the lookups
