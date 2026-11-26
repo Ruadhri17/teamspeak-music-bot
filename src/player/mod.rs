@@ -3,6 +3,10 @@
 //!
 //! Every playback has a `PlaybackId` and a `Stopper`. Results with a stale ID are dropped.
 //!
+//! The audio thread decodes ahead of what is heard. A track that finished decoding moves to
+//! `tails` while its end still waits in the buffer, and the next one starts decoding. What
+//! is heard is the oldest tail, until the client reports that its last frame went out.
+//!
 //! - `mod.rs`: `Player`, its errors and what it reports
 //! - `launcher`: `Launcher`, the interface to the audio thread
 //! - `state`: `State` and `PlaybackId`
@@ -20,7 +24,7 @@ pub(crate) use state::Ended;
 #[cfg(test)]
 pub(crate) use {song::chat_reason, state::PlaybackId};
 
-use std::{num::NonZeroUsize, sync::Arc};
+use std::{collections::VecDeque, num::NonZeroUsize, sync::Arc};
 
 use tokio::sync::{mpsc, watch};
 
@@ -30,7 +34,7 @@ use crate::{
     teamspeak::AudioControl,
 };
 use queue::Queue;
-use state::{Kind, State};
+use state::{Kind, Playback, State};
 
 /// A refused request, the text is meant for the chat.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -48,7 +52,8 @@ pub enum PlayerError {
 pub enum Notice {
     /// A track failed to open or to play. `reason` is safe to show on the chat.
     CouldNotPlay { title: String, reason: String },
-    /// A song from the queue started, `current` shows it. Not sent for the sound of an event.
+    /// A song from the queue started to be heard, `current` shows it. Not sent for the
+    /// sound of an event.
     SongStarted,
     /// The sound of an event played to its end, or failed while playing.
     SoundEnded,
@@ -73,7 +78,11 @@ pub struct Current<'a> {
 }
 
 pub struct Player {
+    /// The playback that decodes now.
     state: State,
+    /// Tracks that finished decoding while their end is still in the buffer, oldest first.
+    /// The first one is heard now, before the track of `state`.
+    tails: VecDeque<Playback>,
     /// Songs after the current one.
     queue: Queue,
     /// The ID for the next playback, only ever goes up.
@@ -105,6 +114,7 @@ impl Player {
         control.send_modify(|control| control.volume = config.audio.default_volume);
         Self {
             state: State::Idle,
+            tails: VecDeque::new(),
             queue: Queue::new(config.queue.max_len),
             next_id: 0,
             launcher,
@@ -131,9 +141,11 @@ impl Player {
         std::mem::take(&mut self.notices)
     }
 
-    /// Music plays. A paused track and the sound of an event do not count.
+    /// Music plays, also the end of a decoded track. A paused track and the sound of an
+    /// event do not count.
     pub fn is_playing(&self) -> bool {
         matches!(&self.state, State::Playing(playback) if playback.kind == Kind::Track)
+            || (!self.tails.is_empty() && !self.control.borrow().paused)
     }
 
     pub fn queue_is_empty(&self) -> bool {
@@ -142,11 +154,17 @@ impl Player {
 
     /// Nothing plays and nothing is paused.
     pub fn is_idle(&self) -> bool {
-        matches!(self.state, State::Idle)
+        matches!(self.state, State::Idle) && self.tails.is_empty()
     }
 
-    /// The current track. `None` while idle or while the sound of an event plays.
+    /// The track heard now. `None` while idle or while the sound of an event plays.
     pub fn current(&self) -> Option<Current<'_>> {
+        if let Some(tail) = self.tails.front() {
+            return Some(Current {
+                track: &tail.track,
+                paused: self.control.borrow().paused,
+            });
+        }
         match &self.state {
             State::Playing(playback) if playback.kind == Kind::Track => Some(Current {
                 track: &playback.track,
@@ -158,6 +176,31 @@ impl Player {
             }),
             _ => None,
         }
+    }
+}
+
+impl Player {
+    /// The track after the one heard now, while that is the end of a decoded track. It
+    /// decodes ahead already, so it is no longer in the queue.
+    pub fn up_next(&self) -> Option<&TrackRef> {
+        if self.tails.is_empty() {
+            return None;
+        }
+        if let Some(tail) = self.tails.get(1) {
+            return Some(&tail.track);
+        }
+        match &self.state {
+            State::Playing(playback) | State::Paused(playback) if playback.kind == Kind::Track => {
+                Some(&playback.track)
+            }
+            _ => None,
+        }
+    }
+
+    /// A track is heard now: the oldest tail, or the playing track when no tail is left.
+    fn track_heard(&self) -> bool {
+        !self.tails.is_empty()
+            || matches!(&self.state, State::Playing(playback) if playback.kind == Kind::Track)
     }
 }
 

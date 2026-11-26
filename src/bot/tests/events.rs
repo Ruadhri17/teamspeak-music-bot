@@ -430,6 +430,21 @@ async fn song_start_runs_for_every_song() {
 }
 
 #[tokio::test]
+async fn song_start_waits_until_the_song_is_heard() {
+    let mut h = song_start(Event {
+        message: text("Now playing: {song}"),
+        ..Event::default()
+    });
+    h.add(&["a.mp3", "b.mp3"]).await;
+    assert_eq!(h.outbox(), on_channel("Now playing: a"));
+    let a = h.current_id();
+    h.finish_current();
+    assert!(h.outbox().is_empty());
+    h.played(a);
+    assert_eq!(h.outbox(), on_channel("Now playing: b"));
+}
+
+#[tokio::test]
 async fn the_song_in_a_message_is_escaped() {
     let mut h = song_start(Event {
         message: text("[b]{song}[/b]"),

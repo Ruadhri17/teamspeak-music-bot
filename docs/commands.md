@@ -146,7 +146,7 @@ Replies with the title of the song that is playing now, with `(paused)` after it
 
 ### `!queue show` / `!queue display`
 
-Shows the song that is playing now and the upcoming songs, numbered from 1. A long queue is split into pages: `!queue show 2` shows the second page.
+Shows the song that is playing now and the upcoming songs, numbered from 1. A long queue is split into pages: `!queue show 2` shows the second page. In the last seconds of a song, the next one is shown as `Next:` without a number: it is already being prepared, so `!queue remove` does not reach it, `!song next` skips to it.
 
 ### `!queue remove <number>` / `!queue remove last`
 

@@ -59,7 +59,11 @@ impl Player {
         self.control.send_modify(|control| control.paused = false);
         self.state = match mem::take(&mut self.state) {
             State::Paused(playback) => State::Playing(playback),
-            State::Idle if self.queue.is_empty() => return Err(PlayerError::QueueEmpty),
+            State::Idle if self.queue.is_empty() && self.tails.is_empty() => {
+                return Err(PlayerError::QueueEmpty);
+            }
+            // The end of a track that finished while paused plays on.
+            State::Idle if self.queue.is_empty() => State::Idle,
             State::Idle => {
                 self.play_next();
                 return Ok(());
@@ -69,10 +73,35 @@ impl Player {
         Ok(())
     }
 
-    /// Starts the next track, or stops playback when the queue is empty.
+    /// Skips the track heard now: starts the next one, or stops playback when the queue is
+    /// empty.
     pub fn next(&mut self) {
-        self.stop_current();
-        self.play_next();
+        if self.tails.is_empty() {
+            self.stop_current();
+            self.play_next();
+            return;
+        }
+        // The end of a decoded track is heard. Only its frames go, the track behind it
+        // keeps what it decoded already.
+        self.tails.pop_front();
+        let keep_from = self
+            .tails
+            .front()
+            .or(self.state.playback())
+            .map_or(self.next_id, |playback| playback.id.0);
+        self.control.send_modify(|control| {
+            control.min_stream_id = keep_from;
+            control.paused = false;
+        });
+        self.state = match mem::take(&mut self.state) {
+            State::Paused(playback) => State::Playing(playback),
+            other => other,
+        };
+        if self.tails.is_empty() && matches!(self.state, State::Idle) {
+            self.play_next();
+        } else if self.track_heard() {
+            self.notices.push(Notice::SongStarted);
+        }
     }
 
     /// Starts the queue when nothing plays. For the bot, after the sound of an event that
@@ -111,6 +140,8 @@ impl Player {
         }
         // IDs only go up, so `next_id` is above every stream started so far: the client
         // drops their buffered frames and plays only the streams started from now on.
+        // The ends of decoded tracks go with them.
+        self.tails.clear();
         let min_stream_id = self.next_id;
         self.control.send_modify(|control| {
             control.min_stream_id = min_stream_id;
@@ -119,8 +150,10 @@ impl Player {
         self.state = State::Idle;
     }
 
-    /// A track finished decoding, its end may still be in the buffer.
-    /// Stale IDs are ignored. A failure of the current track becomes a notice.
+    /// A track finished decoding, its end is still in the buffer: it becomes a tail, heard
+    /// before the next track, which starts decoding now.
+    /// Stale IDs are ignored. A failure of the current track becomes a notice, a failed
+    /// track has no end to wait for.
     /// A sound that decoded to its end waits for `played`, its end is still to be heard.
     /// A failed sound ends at once, the bot decides whether the queue goes on.
     pub fn finished(&mut self, Ended { id, failure }: Ended) {
@@ -135,6 +168,7 @@ impl Player {
             }
             return;
         }
+        let failed = failure.is_some();
         if let (Some(playback), Some(reason)) = (self.state.playback(), failure)
             && playback.id == id
         {
@@ -143,20 +177,26 @@ impl Player {
                 reason,
             });
         }
-        match &self.state {
+        match mem::take(&mut self.state) {
             // `stop_current` is not used, the buffered end must play before the next track.
             State::Playing(playback) if playback.id == id => {
-                self.state = State::Idle;
+                if !failed {
+                    self.tails.push_back(playback);
+                }
                 self.play_next();
             }
             // Advancing would cancel the pause, playback continues on `resume`.
-            State::Paused(playback) if playback.id == id => self.state = State::Idle,
-            _ => {}
+            State::Paused(playback) if playback.id == id => {
+                if !failed {
+                    self.tails.push_back(playback);
+                }
+            }
+            other => self.state = other,
         }
     }
 
     /// The client sent the last frame of `stream`. Ends the sound of an event when it is
-    /// still the current one, a track moved on when it finished decoding.
+    /// still the current one. For a track, its tail is gone and the next track is heard.
     pub fn played(&mut self, stream: u64) {
         if let State::Playing(playback) = &self.state
             && playback.kind == Kind::Sound
@@ -164,6 +204,14 @@ impl Player {
         {
             self.state = State::Idle;
             self.notices.push(Notice::SoundEnded);
+            return;
+        }
+        let before = self.tails.len();
+        while self.tails.front().is_some_and(|tail| tail.id.0 <= stream) {
+            self.tails.pop_front();
+        }
+        if self.tails.len() < before && self.track_heard() {
+            self.notices.push(Notice::SongStarted);
         }
     }
 
@@ -216,7 +264,8 @@ impl Player {
             track,
             kind,
         });
-        if kind == Kind::Track {
+        // Behind the end of a decoded track it is heard later, `played` reports it then.
+        if kind == Kind::Track && self.tails.is_empty() {
             self.notices.push(Notice::SongStarted);
         }
     }

@@ -1,6 +1,6 @@
 use std::fs;
 
-use super::harness::{Harness, on_channel};
+use super::harness::{Harness, on_channel, reply};
 use crate::player::Ended;
 
 #[tokio::test]
@@ -53,12 +53,84 @@ async fn finished_starts_the_next_track_and_keeps_the_buffered_end() {
 }
 
 #[tokio::test]
-async fn finished_with_an_empty_queue_goes_idle() {
+async fn finished_with_an_empty_queue_goes_idle_once_heard() {
+    let mut h = Harness::new();
+    h.add(&["a.mp3"]).await;
+    let id = h.current_id();
+    h.finish_current();
+    assert!(!h.is_idle());
+    assert_eq!(h.send("!song current"), reply("a"));
+    h.played(id);
+    assert!(h.is_idle());
+    assert_eq!(h.send("!song current"), reply("nothing is playing"));
+    assert_eq!(h.control().min_stream_id, 0);
+}
+
+#[tokio::test]
+async fn current_is_the_heard_track_until_its_end_went_out() {
+    let mut h = Harness::new();
+    h.add(&["a.mp3", "b.mp3", "c.mp3"]).await;
+    let a = h.current_id();
+    h.finish_current();
+    assert_eq!(h.playing(), Some("b"));
+    assert_eq!(h.send("!song current"), reply("a"));
+    assert_eq!(h.send("!queue show"), reply("Now: a\nNext: b\n1. c"));
+    h.played(a);
+    assert_eq!(h.send("!song current"), reply("b"));
+    assert_eq!(h.send("!queue show"), reply("Now: b\n1. c"));
+}
+
+#[tokio::test]
+async fn next_during_the_end_of_a_track_skips_only_that_end() {
+    let mut h = Harness::new();
+    h.add(&["a.mp3", "b.mp3", "c.mp3"]).await;
+    h.finish_current();
+    let b = h.current_id();
+    assert_eq!(h.send("!song next"), None);
+    assert_eq!(h.current_id(), b);
+    assert_eq!(h.control().min_stream_id, b.0);
+    assert_eq!(h.send("!song current"), reply("b"));
+    assert_eq!(h.queued(), ["c"]);
+}
+
+#[tokio::test]
+async fn next_after_the_last_decoded_track_stops() {
     let mut h = Harness::new();
     h.add(&["a.mp3"]).await;
     h.finish_current();
+    assert_eq!(h.send("!song next"), None);
     assert!(h.is_idle());
-    assert_eq!(h.control().min_stream_id, 0);
+    assert_eq!(h.send("!song current"), reply("nothing is playing"));
+}
+
+#[tokio::test]
+async fn short_tracks_are_heard_in_order() {
+    let mut h = Harness::new();
+    h.add(&["a.mp3", "b.mp3", "c.mp3"]).await;
+    let a = h.current_id();
+    h.finish_current();
+    let b = h.current_id();
+    h.finish_current();
+    assert_eq!(h.playing(), Some("c"));
+    assert_eq!(h.send("!song current"), reply("a"));
+    assert_eq!(
+        h.send("!queue show"),
+        reply("Now: a\nNext: b\nthe queue is empty")
+    );
+    h.played(a);
+    assert_eq!(h.send("!song current"), reply("b"));
+    h.played(b);
+    assert_eq!(h.send("!song current"), reply("c"));
+}
+
+#[tokio::test]
+async fn clear_drops_the_end_of_a_decoded_track() {
+    let mut h = Harness::new();
+    h.add(&["a.mp3", "b.mp3"]).await;
+    h.finish_current();
+    assert_eq!(h.send("!queue clear"), None);
+    assert!(h.is_idle());
+    assert_eq!(h.send("!song current"), reply("nothing is playing"));
 }
 
 #[tokio::test]
@@ -139,8 +211,8 @@ async fn finished_while_paused_waits_idle_and_stays_paused() {
     h.add(&["a.mp3", "b.mp3"]).await;
     h.send("!song pause");
     h.finish_current();
-    assert!(h.is_idle());
     assert!(h.control().paused);
+    assert_eq!(h.send("!song current"), reply("a (paused)"));
     assert_eq!(h.queued(), ["b"]);
 }
 

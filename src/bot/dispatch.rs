@@ -132,6 +132,10 @@ impl Bot {
         if let Some(current) = self.player.current() {
             lines.push(format!("Now: {}", title(current.track)));
         }
+        // Decoding ahead while the end of the current one plays, out of the queue already.
+        if let Some(next) = self.player.up_next() {
+            lines.push(format!("Next: {}", title(next)));
+        }
         if page.entries.is_empty() {
             lines.push("the queue is empty".to_string());
         }

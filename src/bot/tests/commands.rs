@@ -1,13 +1,9 @@
-use super::harness::{Harness, author, on_channel};
+use super::harness::{Harness, author, on_channel, reply};
 use crate::{
     config::Volume,
     permissions::Role,
     teamspeak::{ReplyTo, TeamspeakRequest},
 };
-
-fn reply(text: &str) -> Option<String> {
-    Some(text.to_string())
-}
 
 #[tokio::test]
 async fn current_in_every_state() {
@@ -195,7 +191,7 @@ async fn titles_cannot_format_the_chat() {
         h.send("!queue show"),
         reply("Now: a\n1. \\[url=https\\]x\\[b\\]")
     );
-    h.finish_current();
+    h.track_heard();
     assert_eq!(h.send("!song current"), reply("\\[url=https\\]x\\[b\\]"));
 }
 

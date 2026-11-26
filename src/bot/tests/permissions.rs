@@ -1,9 +1,5 @@
-use super::harness::{Harness, author};
+use super::harness::{Harness, author, reply};
 use crate::{permissions::Role, teamspeak::ReplyTo};
-
-fn reply(text: &str) -> Option<String> {
-    Some(text.to_string())
-}
 
 const PRIVATE: ReplyTo = ReplyTo::Client(7);
 

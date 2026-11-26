@@ -191,6 +191,12 @@ impl Harness {
         self.bot.finished(Ended { id, failure: None });
     }
 
+    pub fn track_heard(&mut self) {
+        let id = self.current_id();
+        self.finish_current();
+        self.played(id);
+    }
+
     pub fn sound_heard(&mut self) {
         let id = self.current_id();
         self.bot.finished(Ended { id, failure: None });
@@ -230,6 +236,10 @@ impl Harness {
     pub fn queued(&self) -> Vec<String> {
         self.bot.player.queued()
     }
+}
+
+pub fn reply(text: &str) -> Option<String> {
+    Some(text.to_string())
 }
 
 pub fn on_channel(text: &str) -> Vec<(ReplyTo, String)> {
