@@ -3,6 +3,8 @@
 compose := "docker compose -f dev/docker-compose.yml"
 # Keep in step with the deny job in .github/workflows/ci.yml.
 deny_version := "0.22.1"
+# Keep in step with the licenses job in .github/workflows/release.yml.
+about_version := "0.9.3"
 
 # List all tasks
 default:
@@ -34,12 +36,17 @@ deps:
     fi
     rustup component add rustfmt clippy
     cargo install --locked cargo-deny@{{deny_version}}
+    cargo install --locked cargo-about@{{about_version}}
     cargo build
     sudo ./target/debug/tsmusic setup --tools-only --yes
 
 # Known vulnerabilities, licenses and sources of the dependencies, see deny.toml
 deny:
     cargo deny check
+
+# Notices of the crates built into the binary, as published with a release, see about.toml
+licenses:
+    cargo about generate --locked --fail about.hbs -o THIRD_PARTY_LICENSES.txt
 
 # Format all code
 fmt:

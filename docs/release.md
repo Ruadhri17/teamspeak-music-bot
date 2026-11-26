@@ -16,7 +16,8 @@ The workflow then:
 1. runs CI again on the tagged commit,
 2. stops when the tag is not `v` plus the version in `Cargo.toml`,
 3. builds `tsmusic-x86_64-unknown-linux-gnu` and `tsmusic-aarch64-unknown-linux-gnu` on Ubuntu 22.04 (glibc 2.35, so the bot runs on Debian 12, Ubuntu 22.04 and newer), with opus built in,
-4. publishes the release with both binaries, `SHA256SUMS` and notes generated from the changes since the previous tag.
+4. writes `THIRD_PARTY_LICENSES.txt`, the notices of every crate built into the binary (MIT and the BSD licenses require them in a binary distribution, `just licenses` writes the same file locally),
+5. publishes the release with both binaries, the notices, `SHA256SUMS` and notes generated from the changes since the previous tag.
 
 A tag with a suffix, e.g. `v0.2.0-rc.1`, gives a pre-release. `install.sh` skips it unless asked: `TSMUSIC_VERSION=v0.2.0-rc.1`.
 

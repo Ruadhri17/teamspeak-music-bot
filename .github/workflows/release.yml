@@ -1,6 +1,7 @@
 # Publishes a release when a tag v* is pushed, see docs/release.md.
 #
-# The release has one binary per architecture, tsmusic-<target>, and SHA256SUMS.
+# The release has one binary per architecture, tsmusic-<target>, the notices of the crates
+# built into it, THIRD_PARTY_LICENSES.txt, and SHA256SUMS.
 # install.sh and `tsmusic setup` depend on these names.
 #
 # The binaries are built on Ubuntu 22.04, so they need glibc 2.35 at most and run on
@@ -91,23 +92,50 @@ jobs:
           path: dist/tsmusic-${{ matrix.target }}
           if-no-files-found: error
 
+  licenses:
+    name: Third-party licenses
+    needs: version
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The same version as `just deps`, from its release with the checksum checked.
+      - uses: taiki-e/install-action@893d6ee8d714b6c7dfe2bcd94e5759e9a7958a7e # v2.90.10
+        with:
+          tool: cargo-about@0.9.3
+          fallback: none
+
+      # MIT and the BSD licenses require their notices next to the binary, see about.toml.
+      - name: Write THIRD_PARTY_LICENSES.txt
+        run: |
+          mkdir dist
+          cargo about generate --locked --fail about.hbs -o dist/THIRD_PARTY_LICENSES.txt
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: third-party-licenses
+          path: dist/THIRD_PARTY_LICENSES.txt
+          if-no-files-found: error
+
   publish:
     name: Publish the release
-    needs: build
+    needs: [build, licenses]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          pattern: tsmusic-*
           path: dist
           merge-multiple: true
 
       - name: Write SHA256SUMS
         working-directory: dist
         run: |
-          sha256sum tsmusic-* >SHA256SUMS
+          sha256sum tsmusic-* THIRD_PARTY_LICENSES.txt >SHA256SUMS
           cat SHA256SUMS
 
       # A tag with a suffix (v0.2.0-rc.1) is a pre-release, releases/latest and install.sh skip it.

@@ -1,0 +1,24 @@
+# `cargo about generate about.hbs` writes the notices of every crate built into the binary,
+# published with each release as THIRD_PARTY_LICENSES.txt (see .github/workflows/release.yml).
+# MIT and the BSD licenses require these notices in a binary distribution.
+
+# For a crate under several licenses the first one listed here is used.
+accepted = ["MIT", "Apache-2.0", "BSD-3-Clause", "ISC", "Unicode-3.0"]
+targets = ["x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu"]
+# Build scripts and tests do not end up in the binary.
+ignore-build-dependencies = true
+ignore-dev-dependencies = true
+
+# The crate is ISC, the bundled Opus it builds into the binary is BSD-3-Clause.
+[audiopus_sys.clarify]
+license = "ISC AND BSD-3-Clause"
+
+[[audiopus_sys.clarify.files]]
+path = "LICENSE.md"
+license = "ISC"
+checksum = "a6c8bb45880edc99bb13feb04d69fb2f0f73b565dfe209affa60414d2aa4c1a7"
+
+[[audiopus_sys.clarify.files]]
+path = "opus/COPYING"
+license = "BSD-3-Clause"
+checksum = "8338ce8d922bb4416ce3dd1e5680173332435e3f0755007ac7801ccd674fe682"
