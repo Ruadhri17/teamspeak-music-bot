@@ -1,0 +1,38 @@
+# `cargo deny check`: known vulnerabilities, licenses, where crates come from.
+# Runs in CI on every push and once a week, new advisories come without code changes.
+# Every ignored advisory says why it does not apply or cannot be fixed yet.
+
+[graph]
+targets = ["x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu"]
+
+[advisories]
+# Unmaintained crates count only among our own dependencies, those we can replace.
+unmaintained = "workspace"
+yanked = "deny"
+ignore = [
+    { id = "RUSTSEC-2026-0150", reason = "audiopus_sys is unmaintained, but tsclientlib depends on audiopus too, so it cannot be replaced alone" },
+    { id = "RUSTSEC-2026-0542", reason = "humantime is unmaintained, it only parses durations from config.toml. TODO: replace it" },
+    { id = "RUSTSEC-2026-0387", reason = "crypto-bigint 0.5 comes through p256 in tsclientlib, elliptic-curve 0.13 does not allow the fixed version. A timing attack would need precise timing of the bot's handshake" },
+]
+
+[licenses]
+# Every license in the dependency tree, all of them permissive.
+allow = [
+    "Apache-2.0",
+    "BSD-3-Clause",
+    "ISC",
+    "MIT",
+    "Unicode-3.0",
+]
+confidence-threshold = 0.8
+
+[bans]
+multiple-versions = "allow"
+wildcards = "deny"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+# Not released on crates.io since 2021, pinned to a commit in Cargo.toml.
+allow-git = ["https://github.com/ReSpeak/tsclientlib"]

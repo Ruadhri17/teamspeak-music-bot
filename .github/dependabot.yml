@@ -1,0 +1,20 @@
+# Weekly updates in one pull request per ecosystem.
+version: 2
+updates:
+  # The commit pins in .github/workflows.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+
+  # Major versions come one by one, they may need code changes.
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      minor-and-patch:
+        update-types: [minor, patch]
