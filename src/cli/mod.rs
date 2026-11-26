@@ -3,9 +3,11 @@
 //!
 //! - `mod.rs`: `Cli`, `Command` and `init`
 //! - `yt_check`: `tsmusic yt-check`
+//! - `setup`: `tsmusic setup`, installing the bot as a service
 //!
 //! `run` starts the bot itself and stays in `main.rs`.
 
+pub mod setup;
 pub mod yt_check;
 
 use std::path::PathBuf;
@@ -51,6 +53,21 @@ pub enum Command {
         /// Decode the whole track, not only the first 10 seconds.
         #[arg(long)]
         full: bool,
+    },
+
+    /// Install the programs the bot needs and set it up as a systemd service. Run as root.
+    Setup {
+        /// Take the defaults without asking: install what is missing, set up the service.
+        #[arg(long, short)]
+        yes: bool,
+
+        /// Download yt-dlp and deno again and restart a running service.
+        #[arg(long)]
+        update: bool,
+
+        /// Change nothing, only show the commands.
+        #[arg(long)]
+        dry_run: bool,
     },
 }
 

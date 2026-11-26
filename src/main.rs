@@ -49,6 +49,15 @@ async fn main() -> anyhow::Result<()> {
         Command::YtCheck { query, full } => {
             cli::yt_check::run(&location, cli.log_level, &query.join(" "), full).await
         }
+        Command::Setup {
+            yes,
+            update,
+            dry_run,
+        } => cli::setup::run(cli::setup::Options {
+            yes,
+            update,
+            dry_run,
+        }),
     }
 }
 

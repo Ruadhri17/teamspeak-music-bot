@@ -9,7 +9,7 @@ use std::{
 use super::{Config, ConfigError, ConfigResult, Sound, validate::validate};
 
 /// Commented template written by `tsmusic init`. Path is relative to this source file.
-pub(super) const TEMPLATE: &str = include_str!("../../config.example.toml");
+pub const TEMPLATE: &str = include_str!("../../config.example.toml");
 
 /// The config file and its directory, created from `--config`.
 #[derive(Debug, Clone)]
