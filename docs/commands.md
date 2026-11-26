@@ -51,8 +51,8 @@ Commands from other channels are rejected with a short message. `!help`, `!bot p
 | --- | --- |
 | `!song add <link>` | Adds whatever the link points to (a track, an album or a playlist) |
 | `!song add <search phrase>` | Searches for a track and adds the first result |
-| `!song add --album <search phrase>` | Searches for an album and adds all its tracks |
-| `!song add --playlist <search phrase>` | Searches public playlists and adds all tracks of the first result |
+| `!song add --album <search phrase>` | *(not available yet)* Searches for an album and adds all its tracks |
+| `!song add --playlist <search phrase>` | *(not available yet)* Searches public playlists and adds all tracks of the first result |
 | `!song add --source <source> ...` | Uses the given source instead of the default one |
 | `!song stop` / `!song pause` | Pauses the current song; the queue is kept |
 | `!song resume` | Resumes the paused song, or starts the next one in the queue |
@@ -65,10 +65,10 @@ Commands from other channels are rejected with a short message. `!help`, `!bot p
 | `!bot summon` | *(private message)* Brings the bot from its home channel to yours |
 | `!bot volume [0-100]` | Shows the volume, or sets it for all songs |
 | `!bot ping` | Checks that the bot answers |
-| `!bot config list [section]` | *(admins only, private message)* Lists the bot settings |
-| `!bot config get <key>` | *(admins only, private message)* Shows one setting |
-| `!bot config set <key> <value>` | *(admins only, private message)* Changes a bot setting |
-| `!bot config reload` | *(admins only, private message)* Reloads settings after editing `config.toml` by hand |
+| `!bot config list [section]` | *(admins only, private message, not available yet)* Lists the bot settings |
+| `!bot config get <key>` | *(admins only, private message, not available yet)* Shows one setting |
+| `!bot config set <key> <value>` | *(admins only, private message, not available yet)* Changes a bot setting |
+| `!bot config reload` | *(admins only, private message, not available yet)* Reloads settings after editing `config.toml` by hand |
 | `!help` | Lists the command families, see [Getting help](#getting-help) |
 
 ## `!song` - playback
@@ -106,7 +106,7 @@ YouTube links:
 **Search phrases** are free text, passed to the service's search just as you typed them. You can write the title alone, the artist and the title, the title and the artist, and so on. The bot adds the **first result**.
 
 - By default the bot searches for a **track** (`--track`).
-- Use `--album` or `--playlist` to search for an album or a playlist instead. The whole album or playlist is added. `--playlist` searches **public playlists** only.
+- Use `--album` or `--playlist` to search for an album or a playlist instead. The whole album or playlist is added. `--playlist` searches **public playlists** only. *Not available yet:* the bot answers that it is not supported; add a playlist link instead.
 - The search uses the **default source** (YouTube, unless changed in the configuration). Use `--source` to pick another one:
 
 | `--source` value | What it plays | Status |
@@ -136,7 +136,7 @@ Continues the paused song from where it stopped. If no song is paused, it starts
 
 ### `!song next` / `!song skip`
 
-Both commands do the same thing: they skip the current song, including one that is still loading, and play the next one. If the queue is empty, playback stops and the bot tells you so.
+Both commands do the same thing: they skip the current song, including one that is still loading, and play the next one. If the queue is empty, playback stops.
 
 ### `!song current`
 
@@ -175,6 +175,8 @@ The scale is logarithmic, like most volume controls: 50 is clearly quieter than 
 The bot replies `pong`. Use it to check that the bot is connected and reads the chat.
 
 ### `!bot config` (admins only)
+
+*Not available yet:* for now the bot answers that it is not supported, and settings are changed in `config.toml` followed by a restart.
 
 The bot accepts these commands only from admins, and only in a private message, so that settings are not shown to the whole channel.
 

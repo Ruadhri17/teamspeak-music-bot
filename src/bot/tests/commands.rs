@@ -108,17 +108,16 @@ async fn ping_answers_pong() {
 }
 
 #[tokio::test]
-async fn config_commands_are_not_handled_by_the_player() {
+async fn config_commands_say_they_are_not_supported_yet() {
     let mut h = Harness::new();
     let admin = author(1, Role::Admin, true);
-    assert_eq!(
-        h.send_as(ReplyTo::Channel, &admin, "!bot config list"),
-        None
-    );
-    assert_eq!(
-        h.send_as(ReplyTo::Channel, &admin, "!bot config reload"),
-        None
-    );
+    for text in ["!bot config list", "!bot config reload"] {
+        assert_eq!(
+            h.send_as(ReplyTo::Channel, &admin, text),
+            reply("!bot config is not supported yet"),
+            "{text}"
+        );
+    }
     assert!(h.teamspeak_requests().is_empty());
 }
 
@@ -258,4 +257,23 @@ async fn queue_show_fits_long_titles_into_one_message() {
     assert!(text.contains("15. 15 Very Long"), "{text}");
     assert!(text.ends_with("page 1/2"), "{text}");
     assert!(text.lines().all(|line| line.chars().count() < 70), "{text}");
+}
+
+#[tokio::test]
+async fn album_and_playlist_search_say_they_are_not_supported_yet() {
+    let mut h = Harness::new();
+    for text in [
+        "!song add --album abba gold",
+        "!song add --playlist summer hits",
+    ] {
+        assert_eq!(
+            h.send(text),
+            reply(
+                "searching for albums and playlists is not supported yet, add a playlist link instead"
+            ),
+            "{text}"
+        );
+    }
+    assert!(h.is_idle());
+    assert!(h.bot.lookups.is_empty());
 }

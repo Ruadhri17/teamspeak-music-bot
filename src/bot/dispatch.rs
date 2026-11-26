@@ -10,7 +10,7 @@ use crate::{
     chat,
     commands::Command,
     permissions::{self, Role},
-    sources::TrackRef,
+    sources::{QueryType, SearchKind, TrackRef},
     teamspeak::{Author, ReplyTo, TeamspeakRequest},
 };
 
@@ -40,6 +40,15 @@ impl Bot {
     /// Runs a command and returns the chat reply, if any.
     fn execute(&mut self, command: Command, reply_to: ReplyTo, author: &Author) -> Option<String> {
         match command {
+            // Links carry their own type, so the flags only matter for a phrase.
+            Command::Add {
+                query: QueryType::Phrase(_),
+                kind: SearchKind::Album | SearchKind::Playlist,
+                ..
+            } => Some(
+                "searching for albums and playlists is not supported yet, add a playlist link instead"
+                    .to_string(),
+            ),
             Command::Add { query, source, .. } => {
                 self.add(query, source, reply_to);
                 None
@@ -92,7 +101,7 @@ impl Bot {
             Command::ConfigList { .. }
             | Command::ConfigGet { .. }
             | Command::ConfigSet { .. }
-            | Command::ConfigReload => None,
+            | Command::ConfigReload => Some("!bot config is not supported yet".to_string()),
         }
     }
 
