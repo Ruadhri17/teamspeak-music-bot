@@ -58,9 +58,44 @@ async fn goodbye_plays_its_sound_then_goes_home() {
     h.run(&[alone()]);
     assert_eq!(h.teamspeak_requests(), [say("bye")]);
     assert_eq!(h.sound(), Some("bye.wav"));
-    h.finish_current();
+    h.sound_heard();
     assert_eq!(h.teamspeak_requests(), [GO_HOME]);
     assert!(h.is_idle());
+}
+
+#[tokio::test]
+async fn a_decoded_sound_waits_until_it_is_heard() {
+    let mut h = with_sounds();
+    h.run(&[alone()]);
+    h.teamspeak_requests();
+    let id = h.current_id();
+    h.finish_current();
+    assert!(h.teamspeak_requests().is_empty());
+    assert_eq!(h.sound(), Some("bye.wav"));
+    h.played(id);
+    assert_eq!(h.teamspeak_requests(), [GO_HOME]);
+}
+
+#[tokio::test]
+async fn the_played_end_of_a_stopped_sound_changes_nothing() {
+    let mut h = with_sounds();
+    h.run(&[alone()]);
+    h.teamspeak_requests();
+    let old = h.current_id();
+    h.run(&[Action::Moved { home: false }]);
+    h.played(old);
+    assert!(h.teamspeak_requests().is_empty());
+}
+
+#[tokio::test]
+async fn the_played_end_of_a_track_is_not_the_end_of_a_sound() {
+    let mut h = with_sounds();
+    h.add(&["a.mp3", "b.mp3"]).await;
+    let first = h.current_id();
+    h.finish_current();
+    h.played(first);
+    assert_eq!(h.playing(), Some("b"));
+    assert!(h.teamspeak_requests().is_empty());
 }
 
 #[tokio::test]
@@ -135,7 +170,7 @@ async fn resume_with_an_empty_queue_keeps_the_goodbye() {
     h.teamspeak_requests();
     h.send("!song resume");
     assert_eq!(h.sound(), Some("bye.wav"));
-    h.finish_current();
+    h.sound_heard();
     assert_eq!(h.teamspeak_requests(), [GO_HOME]);
 }
 
@@ -209,7 +244,7 @@ async fn songs_wait_for_the_welcome_and_start_after_it() {
     h.add(&["a.mp3"]).await;
     assert_eq!(h.sound(), Some("hi.wav"));
     assert_eq!(h.queued(), ["a"]);
-    h.finish_current();
+    h.sound_heard();
     assert_eq!(h.playing(), Some("a"));
     assert_eq!(h.teamspeak_requests(), [describe("hello")]);
 }
@@ -253,7 +288,7 @@ async fn a_second_event_sound_drops_the_rest_of_the_first() {
     h.run(&[alone()]);
     assert_eq!(h.sound(), Some("bye.wav"));
     h.teamspeak_requests();
-    h.finish_current();
+    h.sound_heard();
     assert_eq!(h.teamspeak_requests(), [GO_HOME]);
 }
 
@@ -489,6 +524,6 @@ async fn songs_wait_for_the_connect_sound() {
     assert_eq!(h.sound(), Some("hi.wav"));
     h.add(&["a.mp3"]).await;
     assert_eq!(h.queued(), ["a"]);
-    h.finish_current();
+    h.sound_heard();
     assert_eq!(h.playing(), Some("a"));
 }

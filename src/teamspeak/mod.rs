@@ -412,37 +412,68 @@ impl Client {
     /// Sends one frame, called every `FRAME_DURATION`.
     fn send_frame(&mut self) {
         let control = *self.control.borrow();
-        let frame = self.next_frame(control.min_stream_id);
-        // While tsclientlib reconnects, frames wait like during a pause, `send_audio` would
-        // fail for every one of them. The frame is kept, the stopped ones are already gone:
-        // their audio threads, blocked on the full channel, can see the stop and end.
-        if control.paused || self.home.is_none() {
-            self.held = frame;
-            self.end_speech();
-            return;
-        }
-        let Some(mut frame) = frame else {
-            self.end_speech();
-            return;
-        };
-        match self.output.encode(&mut frame.pcm, control.volume) {
-            Ok(data) => {
-                self.send_audio(&data);
-                self.talking = true;
+        loop {
+            let frame = self.next_frame(control.min_stream_id);
+            // While tsclientlib reconnects, frames wait like during a pause, `send_audio`
+            // would fail for every one of them. The frame is kept, the stopped ones are
+            // already gone: their audio threads, blocked on the full channel, can see the
+            // stop and end.
+            if control.paused || self.home.is_none() {
+                self.held = frame;
+                self.end_speech();
+                return;
             }
-            // One lost frame is a short gap, listeners conceal it.
-            Err(err) => warn!("Opus could not encode a frame: {err}"),
+            match frame {
+                None => {
+                    self.end_speech();
+                    return;
+                }
+                Some(Frame::End { stream }) => {
+                    if !self.report_played(stream) {
+                        self.held = Some(Frame::End { stream });
+                        return;
+                    }
+                    // The next playback may follow right behind, this tick still sends
+                    // its first frame, so there is no gap between tracks.
+                }
+                Some(Frame::Audio { mut pcm, .. }) => {
+                    match self.output.encode(&mut pcm, control.volume) {
+                        Ok(data) => {
+                            self.send_audio(&data);
+                            self.talking = true;
+                        }
+                        // One lost frame is a short gap, listeners conceal it.
+                        Err(err) => warn!("Opus could not encode a frame: {err}"),
+                    }
+                    return;
+                }
+            }
+        }
+    }
+
+    /// Tells the bot that a playback was heard to its end. `false` when the bot is not
+    /// keeping up, the end is then held and reported on a later tick: a lost end would
+    /// leave an event waiting for its sound forever.
+    fn report_played(&mut self, stream: u64) -> bool {
+        match self.events.try_send(TeamspeakEvent::Played(stream)) {
+            Ok(()) => true,
+            Err(TrySendError::Full(_)) => {
+                debug!("the bot is not keeping up, the end of stream {stream} waits");
+                false
+            }
+            // The receiver is gone, which only happens during shutdown.
+            Err(TrySendError::Closed(_)) => true,
         }
     }
 
     /// The oldest frame of a track that still plays. Frames of stopped tracks (a stream ID
-    /// below `min_stream_id`) are dropped on the way.
+    /// below `min_stream_id`) are dropped on the way, their end too.
     fn next_frame(&mut self, min_stream_id: u64) -> Option<Frame> {
         self.held
             .take()
             .into_iter()
             .chain(std::iter::from_fn(|| self.frames.try_recv().ok()))
-            .find(|frame| frame.stream >= min_stream_id)
+            .find(|frame| frame.stream() >= min_stream_id)
     }
 
     /// Sends the end-of-speech packet once after the last frame.

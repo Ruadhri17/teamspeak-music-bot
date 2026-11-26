@@ -121,7 +121,8 @@ impl Player {
 
     /// A track finished decoding, its end may still be in the buffer.
     /// Stale IDs are ignored. A failure of the current track becomes a notice.
-    /// The end of a sound is only reported, the bot decides whether the queue goes on.
+    /// A sound that decoded to its end waits for `played`, its end is still to be heard.
+    /// A failed sound ends at once, the bot decides whether the queue goes on.
     pub fn finished(&mut self, Ended { id, failure }: Ended) {
         if let State::Playing(playback) = &self.state
             && playback.kind == Kind::Sound
@@ -129,9 +130,9 @@ impl Player {
         {
             if let Some(reason) = failure {
                 warn!("the sound {} failed: {reason}", playback.track.title);
+                self.state = State::Idle;
+                self.notices.push(Notice::SoundEnded);
             }
-            self.state = State::Idle;
-            self.notices.push(Notice::SoundEnded);
             return;
         }
         if let (Some(playback), Some(reason)) = (self.state.playback(), failure)
@@ -151,6 +152,18 @@ impl Player {
             // Advancing would cancel the pause, playback continues on `resume`.
             State::Paused(playback) if playback.id == id => self.state = State::Idle,
             _ => {}
+        }
+    }
+
+    /// The client sent the last frame of `stream`. Ends the sound of an event when it is
+    /// still the current one, a track moved on when it finished decoding.
+    pub fn played(&mut self, stream: u64) {
+        if let State::Playing(playback) = &self.state
+            && playback.kind == Kind::Sound
+            && playback.id.0 == stream
+        {
+            self.state = State::Idle;
+            self.notices.push(Notice::SoundEnded);
         }
     }
 

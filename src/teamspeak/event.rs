@@ -16,6 +16,8 @@ pub enum TeamspeakEvent {
     /// The bot connected or reconnected and knows its home channel. Comes after the first
     /// `Channel` of the connection.
     Connected,
+    /// The last frame of the playback with this number went out, it was heard to its end.
+    Played(u64),
 }
 
 /// Who sent a message, as the client sees them when it arrives.

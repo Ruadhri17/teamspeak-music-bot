@@ -160,6 +160,10 @@ impl Bot {
                 let actions = self.events.connected(Instant::now());
                 self.run_actions(actions);
             }
+            TeamspeakEvent::Played(stream) => {
+                self.player.played(stream);
+                self.report();
+            }
         }
     }
 

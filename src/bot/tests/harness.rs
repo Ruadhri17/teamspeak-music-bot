@@ -191,6 +191,16 @@ impl Harness {
         self.bot.finished(Ended { id, failure: None });
     }
 
+    pub fn sound_heard(&mut self) {
+        let id = self.current_id();
+        self.bot.finished(Ended { id, failure: None });
+        self.played(id);
+    }
+
+    pub fn played(&mut self, id: PlaybackId) {
+        self.bot.handle_event(TeamspeakEvent::Played(id.0));
+    }
+
     pub fn fail_current(&mut self, reason: &str) {
         let id = self.current_id();
         self.bot.finished(Ended {

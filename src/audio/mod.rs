@@ -1,6 +1,8 @@
 //! Audio pipeline: input -> ffmpeg -> PCM f32 48 kHz stereo -> bounded frame buffer
 //! -> volume -> Opus -> send. The audio thread fills the buffer, the client takes
-//! one frame every 20 ms.
+//! one frame every 20 ms. The thread decodes faster than real time, so a playback ends
+//! decoding up to the whole buffer before it is heard. `Frame::End` behind its last frame
+//! tells the client when it really ends.
 //!
 //! The buffer holds PCM, so processing after it (volume) applies from the next frame.
 //!
@@ -82,16 +84,32 @@ pub enum AudioError {
 
 pub type PlayResult = Result<(), AudioError>;
 
-/// 20 ms of PCM and the number of the playback it belongs to.
+/// What the audio thread puts into the buffer, with the number of the playback it
+/// belongs to.
 #[derive(Debug)]
-pub struct Frame {
-    pub stream: u64,
-    /// Boxed, so the 7.7 KB of samples is not copied on every move through the channel.
-    pub pcm: Box<[f32; FRAME_SAMPLES]>,
+pub enum Frame {
+    /// 20 ms of PCM. Boxed, so the 7.7 KB of samples is not copied on every move through
+    /// the channel.
+    Audio {
+        stream: u64,
+        pcm: Box<[f32; FRAME_SAMPLES]>,
+    },
+    /// The playback decoded to its end. When the client takes it, every frame before it
+    /// has gone out.
+    End { stream: u64 },
+}
+
+impl Frame {
+    pub fn stream(&self) -> u64 {
+        match self {
+            Frame::Audio { stream, .. } | Frame::End { stream } => *stream,
+        }
+    }
 }
 
 /// Plays `input` on a new thread, pushing PCM frames tagged with `stream` into `frames`
-/// until the track ends, `stop` is stopped or the receiver is gone.
+/// until the track ends, `stop` is stopped or the receiver is gone. A track that decoded
+/// to its end gets `Frame::End` behind its last frame.
 /// Then the thread calls `on_done` with the result, also when it panics.
 pub fn play(
     ffmpeg_path: PathBuf,
@@ -123,7 +141,7 @@ fn decode(
         if stop.is_stopped() {
             return Ok(());
         }
-        let frame = Frame {
+        let frame = Frame::Audio {
             stream,
             pcm: Box::new(pcm),
         };
@@ -137,7 +155,10 @@ fn decode(
     if stop.is_stopped() {
         return Ok(());
     }
-    decoder.finish()
+    decoder.finish()?;
+    // Blocks behind the buffered frames like they do. `Err` means the client is gone.
+    let _ = frames.blocking_send(Frame::End { stream });
+    Ok(())
 }
 
 /// Calls `on_done` exactly once. When the thread panics, `Drop` reports `Panicked`,

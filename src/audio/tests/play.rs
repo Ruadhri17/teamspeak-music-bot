@@ -56,12 +56,35 @@ fn whole_track_reports_ok_with_tagged_frames() {
     let result = run.done.recv_timeout(TIMEOUT).unwrap();
     assert!(result.is_ok(), "{result:?}");
     let mut count = 0;
+    let mut ended = false;
     while let Ok(frame) = run.frames.try_recv() {
-        assert_eq!(frame.stream, 7);
-        assert!(frame.pcm.iter().any(|sample| sample.abs() > 0.01));
-        count += 1;
+        assert!(!ended, "a frame after the end");
+        match frame {
+            Frame::Audio { stream, pcm } => {
+                assert_eq!(stream, 7);
+                assert!(pcm.iter().any(|sample| sample.abs() > 0.01));
+                count += 1;
+            }
+            Frame::End { stream } => {
+                assert_eq!(stream, 7);
+                ended = true;
+            }
+        }
     }
+    assert!(ended);
     assert!((49..=51).contains(&count), "{count} frames");
+}
+
+#[test]
+fn failed_track_has_no_end_frame() {
+    let mut run = start(
+        "ffmpeg",
+        AudioInput::Stream(Box::new(&b"this is not audio"[..])),
+        8,
+    );
+    let result = run.done.recv_timeout(TIMEOUT).unwrap();
+    assert!(result.is_err());
+    assert!(run.frames.try_recv().is_err());
 }
 
 #[test]
