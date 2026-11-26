@@ -84,7 +84,7 @@ impl Default for AudioConfig {
             bitrate: Bitrate::new(96).unwrap(),
             complexity: Complexity::new(10).unwrap(),
             start_buffer: Duration::from_secs(3),
-            max_buffer: Duration::from_secs(5),
+            max_buffer: Duration::from_secs(15),
             default_volume: Volume::new(50).unwrap(),
             max_volume: Volume::new(100).unwrap(),
             pause_release_after: Duration::from_secs(5 * 60),
