@@ -4,6 +4,7 @@
 //! - `connect`: building the connection from the config
 //! - `event`: `TeamspeakEvent` and translation from tsclientlib events
 //! - `frames`: which frame goes out next, the start buffer and the ends of streams
+//! - `metrics`: the audio statistics logged every `logging.metrics_interval`
 //! - `home`: the home channel and the decision for `!bot summon`
 //! - `request`: `TeamspeakRequest` and executing it on the connection
 //! - `error`: `TeamspeakError` for the whole module
@@ -13,6 +14,7 @@ mod error;
 mod event;
 mod frames;
 mod home;
+mod metrics;
 mod request;
 #[cfg(test)]
 mod tests;
@@ -46,6 +48,7 @@ use tsproto_packets::packets::{AudioData, CodecType, OutAudio};
 
 use frames::Frames;
 use home::ChannelInfo;
+use metrics::AudioMetrics;
 
 use crate::{
     audio::{self, FRAME_DURATION, Frame, Output},
@@ -89,6 +92,8 @@ pub struct Client {
     frames: Frames,
     /// Streams heard to their end that the bot had no room for yet.
     unreported: VecDeque<u64>,
+    metrics: AudioMetrics,
+    metrics_interval: Duration,
     control: watch::Receiver<AudioControl>,
     /// Volume and Opus for the frame that goes out.
     output: Output,
@@ -135,6 +140,8 @@ impl Client {
             requests,
             frames: Frames::new(frames, audio::frames_in(config.audio.start_buffer)),
             unreported: VecDeque::new(),
+            metrics: AudioMetrics::default(),
+            metrics_interval: config.logging.metrics_interval,
             control,
             output: Output::new(config.audio.bitrate, config.audio.complexity)
                 .map_err(TeamspeakError::Encoder)?,
@@ -162,6 +169,10 @@ impl Client {
         // `Delay` would start a new grid from each late tick, so every hiccup would send
         // a bit less audio than real time and the listeners' buffers would slowly run dry.
         ticker.set_missed_tick_behavior(MissedTickBehavior::Burst);
+        let mut metrics = tokio::time::interval_at(
+            Instant::now() + self.metrics_interval,
+            self.metrics_interval,
+        );
 
         loop {
             tokio::select! {
@@ -183,13 +194,20 @@ impl Client {
                 }
                 scheduled = ticker.tick() => {
                     let late = Instant::now().saturating_duration_since(scheduled);
+                    self.metrics.tick(late);
                     if late > RESYNC_AFTER {
                         // After a long stall (a suspended host, an overloaded VPS) making up
                         // for it would send seconds of audio at once, so the grid starts over.
                         warn!("the audio clock was {late:?} late, starting it over");
+                        self.metrics.resync();
                         ticker.reset();
                     }
                     self.send_frame();
+                }
+                _ = metrics.tick() => {
+                    if let Some(line) = self.metrics.report() {
+                        info!("{line}");
+                    }
                 }
                 _ = self.shutdown.cancelled() => break,
             }
@@ -425,15 +443,25 @@ impl Client {
             self.end_speech();
         } else {
             match self.frames.next(control.min_stream_id, self.talking) {
-                Some(mut pcm) => match self.output.encode(&mut pcm, control.volume) {
-                    Ok(data) => {
-                        self.send_audio(&data);
-                        self.talking = true;
+                Some(mut pcm) => {
+                    let started = std::time::Instant::now();
+                    let encoded = self.output.encode(&mut pcm, control.volume);
+                    self.metrics.sent(started.elapsed());
+                    match encoded {
+                        Ok(data) => {
+                            self.send_audio(&data);
+                            self.talking = true;
+                        }
+                        // One lost frame is a short gap, listeners conceal it.
+                        Err(err) => warn!("Opus could not encode a frame: {err}"),
                     }
-                    // One lost frame is a short gap, listeners conceal it.
-                    Err(err) => warn!("Opus could not encode a frame: {err}"),
-                },
-                None => self.end_speech(),
+                }
+                None => {
+                    if self.talking && self.frames.mid_stream(control.min_stream_id) {
+                        self.metrics.underrun();
+                    }
+                    self.end_speech();
+                }
             }
         }
         self.report_played();

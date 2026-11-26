@@ -24,6 +24,9 @@ pub struct Frames {
     start: usize,
     /// Streams whose last frame went out, oldest first, until `take_ended`.
     ended: Vec<u64>,
+    /// The stream of the last frame that went out while its end has not, for telling a
+    /// buffer that ran dry from one whose audio is over.
+    open: Option<u64>,
 }
 
 impl Frames {
@@ -33,6 +36,7 @@ impl Frames {
             held: VecDeque::new(),
             start: start.max(1),
             ended: Vec::new(),
+            open: None,
         }
     }
 
@@ -47,11 +51,25 @@ impl Frames {
         }
         while let Some(frame) = self.pop(min_stream_id) {
             match frame {
-                Frame::Audio { pcm, .. } => return Some(pcm),
-                Frame::End { stream } => self.ended.push(stream),
+                Frame::Audio { stream, pcm } => {
+                    self.open = Some(stream);
+                    return Some(pcm);
+                }
+                Frame::End { stream } => {
+                    if self.open == Some(stream) {
+                        self.open = None;
+                    }
+                    self.ended.push(stream);
+                }
             }
         }
         None
+    }
+
+    /// A stream that still plays has sent frames but not its end yet: an empty buffer now
+    /// is an underrun, not the end of the audio.
+    pub fn mid_stream(&self, min_stream_id: u64) -> bool {
+        self.open.is_some_and(|stream| stream >= min_stream_id)
     }
 
     /// Nothing is sent (a pause, a reconnect). The frames of stopped streams are dropped

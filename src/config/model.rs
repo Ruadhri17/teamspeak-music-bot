@@ -336,6 +336,7 @@ impl Default for PathsConfig {
 pub struct LoggingConfig {
     /// Overridden by `RUST_LOG` and the CLI flag.
     pub level: LogLevel,
+    /// How often the client logs its audio statistics, see `teamspeak::metrics`.
     #[serde(with = "humantime_serde")]
     pub metrics_interval: Duration,
 }

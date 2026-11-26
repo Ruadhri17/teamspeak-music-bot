@@ -109,3 +109,16 @@ fn an_empty_channel_gives_nothing() {
     frames.hold(0);
     assert!(frames.take_ended().is_empty());
 }
+
+#[test]
+fn a_stream_without_its_end_is_still_playing() {
+    let (mut frames, tx) = frames(1, vec![audio(1, 1)]);
+    assert!(!frames.mid_stream(0));
+    assert_eq!(n(frames.next(0, false)), Some(1));
+    assert_eq!(n(frames.next(0, true)), None);
+    assert!(frames.mid_stream(0));
+    assert!(!frames.mid_stream(2));
+    tx.try_send(end(1)).unwrap();
+    assert_eq!(n(frames.next(0, true)), None);
+    assert!(!frames.mid_stream(0));
+}
