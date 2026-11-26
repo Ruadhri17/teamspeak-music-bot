@@ -11,6 +11,8 @@ pub enum TeamspeakEvent {
         author: Author,
         text: String,
     },
+    /// The bot moved, or someone came to or left its channel.
+    Channel(CurrentChannel),
 }
 
 /// Who sent a message, as the client sees them when it arrives.
@@ -22,6 +24,15 @@ pub struct Author {
     pub role: Role,
     /// `false` also when the bot cannot see the author's channel.
     pub in_bot_channel: bool,
+}
+
+/// Where the bot is right now, sent again whenever it moves or someone comes or leaves.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CurrentChannel {
+    pub id: u64,
+    pub at_home: bool,
+    /// Other people in the channel, without the bot and server query clients.
+    pub others: usize,
 }
 
 /// Where an answer goes: the same place the message came from.
@@ -48,7 +59,6 @@ pub fn translate(
     bot_id: ClientId,
     author: impl FnOnce(&Invoker) -> Author,
 ) -> Option<TeamspeakEvent> {
-    // TODO: later: clients joining and leaving the bot's channel, for `on_alone` and `on_party`.
     match event {
         Event::Message {
             target,

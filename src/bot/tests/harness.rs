@@ -1,4 +1,4 @@
-use std::{fs, num::NonZeroUsize, os::unix::fs::PermissionsExt};
+use std::{fs, num::NonZeroUsize, os::unix::fs::PermissionsExt, path::Path};
 
 use tempfile::TempDir;
 use tokio::sync::{mpsc, watch};
@@ -8,9 +8,10 @@ use crate::{
     audio::{AudioInput, PlayResult},
     bot::Bot,
     config::{Config, SourceKind},
+    events::Action,
     permissions::Role,
     player::{Ended, Launcher, PlaybackId},
-    teamspeak::{AudioControl, Author, ReplyTo, TeamspeakEvent, TeamspeakRequest},
+    teamspeak::{AudioControl, Author, CurrentChannel, ReplyTo, TeamspeakEvent, TeamspeakRequest},
 };
 
 pub struct FakeLauncher;
@@ -73,8 +74,12 @@ impl Harness {
     }
 
     pub fn with_config(edit: impl FnOnce(&mut Config)) -> Self {
+        Self::with_config_in(|config, _| edit(config))
+    }
+
+    pub fn with_config_in(edit: impl FnOnce(&mut Config, &Path)) -> Self {
         let dir = tempfile::tempdir().unwrap();
-        for name in ["a.mp3", "b.mp3", "c.mp3"] {
+        for name in ["a.mp3", "b.mp3", "c.mp3", "bye.wav", "hi.wav"] {
             fs::write(dir.path().join(name), b"audio").unwrap();
         }
 
@@ -82,7 +87,7 @@ impl Harness {
         config.sources.default = SourceKind::Local;
         config.sources.local.music_dir = Some(dir.path().to_path_buf());
         config.sources.youtube.yt_dlp_path = dir.path().join("no-yt-dlp");
-        edit(&mut config);
+        edit(&mut config, dir.path());
 
         let (events_tx, events_rx) = mpsc::channel(8);
         let (requests_tx, requests_rx) = mpsc::channel(8);
@@ -103,6 +108,18 @@ impl Harness {
             _teamspeak_events: events_tx,
             _teamspeak_requests: requests_rx,
         }
+    }
+
+    pub fn run(&mut self, actions: &[Action]) {
+        self.bot.run_actions(actions.to_vec());
+    }
+
+    pub fn channel(&mut self, current: CurrentChannel) {
+        self.bot.handle_event(TeamspeakEvent::Channel(current));
+    }
+
+    pub fn sound(&self) -> Option<&str> {
+        self.bot.player.sound()
     }
 
     pub fn send(&mut self, text: &str) -> Option<String> {

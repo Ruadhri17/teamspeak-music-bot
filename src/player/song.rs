@@ -1,14 +1,14 @@
 //! The playback transitions shared by the song and queue operations: queueing, starting,
-//! pausing, stopping and finishing tracks, and the volume.
+//! pausing, stopping and finishing tracks, the sounds of events, and the volume.
 
-use std::mem;
+use std::{fs::File, mem};
 
 use tokio_util::sync::CancellationToken;
 use tracing::warn;
 
 use super::{
     Enqueued, Notice, Player, PlayerError,
-    state::{Ended, Playback, PlaybackId, State},
+    state::{Ended, Kind, Playback, PlaybackId, State},
 };
 use crate::{
     audio::{AudioError, AudioInput},
@@ -41,10 +41,10 @@ impl Player {
         Enqueued { added, full: None }
     }
 
-    /// Pauses a playing track, otherwise does nothing.
+    /// Pauses a playing track, otherwise does nothing. The sound of an event is not paused.
     pub fn pause(&mut self) {
         self.state = match mem::take(&mut self.state) {
-            State::Playing(playback) => {
+            State::Playing(playback) if playback.kind == Kind::Track => {
                 self.control.send_modify(|control| control.paused = true);
                 State::Paused(playback)
             }
@@ -75,10 +75,37 @@ impl Player {
         self.play_next();
     }
 
+    /// Starts the queue when nothing plays. For the bot, after the sound of an event that
+    /// the queue waited for.
+    pub fn start_queue(&mut self) {
+        if let State::Idle = self.state {
+            self.play_next();
+        }
+    }
+
+    /// Plays the sound of an event outside the queue, in place of whatever plays or is
+    /// paused. `Err` is for the log: the file or link could not be opened, nothing changed.
+    pub fn play_sound(&mut self, sound: TrackRef) -> Result<(), String> {
+        let input = self.open(&sound.location)?;
+        self.stop_current();
+        self.start(input, sound, Kind::Sound);
+        Ok(())
+    }
+
+    /// Stops the sound of an event, a track keeps playing.
+    pub fn stop_sound(&mut self) {
+        if matches!(&self.state, State::Playing(playback) if playback.kind == Kind::Sound) {
+            self.stop_current();
+        }
+    }
+
     /// Stops the current track at once, drops its buffered frames and unpauses the client.
     pub(super) fn stop_current(&mut self) {
         if let Some(playback) = self.state.playback() {
             playback.stop.cancel();
+            if playback.kind == Kind::Sound {
+                self.notices.push(Notice::SoundInterrupted);
+            }
         }
         // IDs only go up, so `next_id` is above every stream started so far: the client
         // drops their buffered frames and plays only the streams started from now on.
@@ -92,7 +119,19 @@ impl Player {
 
     /// A track finished decoding, its end may still be in the buffer.
     /// Stale IDs are ignored. A failure of the current track becomes a notice.
+    /// The end of a sound is only reported, the bot decides whether the queue goes on.
     pub fn finished(&mut self, Ended { id, failure }: Ended) {
+        if let State::Playing(playback) = &self.state
+            && playback.kind == Kind::Sound
+            && playback.id == id
+        {
+            if let Some(reason) = failure {
+                warn!("the sound {} failed: {reason}", playback.track.title);
+            }
+            self.state = State::Idle;
+            self.notices.push(Notice::SoundEnded);
+            return;
+        }
         if let (Some(playback), Some(reason)) = (self.state.playback(), failure)
             && playback.id == id
         {
@@ -119,7 +158,7 @@ impl Player {
         while let Some(track) = self.queue.pop_next() {
             match self.open(&track.location) {
                 Ok(input) => {
-                    self.start(input, track);
+                    self.start(input, track, Kind::Track);
                     return;
                 }
                 Err(reason) => {
@@ -134,7 +173,7 @@ impl Player {
     }
 
     /// Starts `input` through the launcher. The player must be idle.
-    fn start(&mut self, input: AudioInput, track: TrackRef) {
+    fn start(&mut self, input: AudioInput, track: TrackRef, kind: Kind) {
         let id = self.new_id();
         let stop = CancellationToken::new();
         let done = self.done_tx.clone();
@@ -155,7 +194,12 @@ impl Player {
                 let _ = done.blocking_send(Ended { id, failure });
             }),
         );
-        self.state = State::Playing(Playback { id, stop, track });
+        self.state = State::Playing(Playback {
+            id,
+            stop,
+            track,
+            kind,
+        });
     }
 
     /// The volume the client applies right now.
@@ -181,6 +225,11 @@ impl Player {
             Location::Youtube(id) => {
                 youtube::open(&self.sources.youtube, id).map_err(|err| err.to_string())
             }
+            // Only event sounds from the config are files, their errors go to the log, where
+            // the path helps the admin.
+            Location::File(path) => File::open(path)
+                .map(AudioInput::File)
+                .map_err(|err| format!("cannot open {}: {err}", path.display())),
         }
     }
 

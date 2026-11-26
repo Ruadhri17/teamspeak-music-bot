@@ -56,6 +56,9 @@ pub struct Playlist {
 pub enum Location {
     /// Relative to `music_dir`, checked again when opened.
     Local(PathBuf),
+    /// Any file on the disk. Only from the config (event sounds), never from the chat,
+    /// which is limited to `Local`.
+    File(PathBuf),
 
     Youtube(VideoId),
     // TODO: Tidal, Spotify, Soundcloud with their own IDs.

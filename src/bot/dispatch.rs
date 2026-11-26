@@ -45,6 +45,7 @@ impl Bot {
                 None
             }
             Command::Resume => {
+                self.end_goodbye();
                 let result = self.player.resume();
                 self.report();
                 result.err().map(|err| err.to_string())
@@ -128,7 +129,7 @@ impl Bot {
 
     /// `!queue clear`. Empties the queue, stops the current track and cancels the lookups
     /// of `!song add` that have not finished yet.
-    fn queue_clear(&mut self) {
+    pub(super) fn queue_clear(&mut self) {
         self.lookups.abort_all();
         self.pending.clear();
         self.player.clear();

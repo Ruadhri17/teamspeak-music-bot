@@ -74,6 +74,8 @@ impl Bot {
         let count = tracks.len();
         let Enqueued { added, full } = self.player.enqueue(tracks);
         self.report();
+        // During a goodbye the tracks only queued, they end it now.
+        self.end_goodbye();
 
         let total = playlist
             .as_ref()

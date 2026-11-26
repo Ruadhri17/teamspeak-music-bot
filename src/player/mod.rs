@@ -30,7 +30,7 @@ use crate::{
     teamspeak::AudioControl,
 };
 use queue::Queue;
-use state::State;
+use state::{Kind, State};
 
 /// A refused request, the text is meant for the chat.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -48,6 +48,11 @@ pub enum PlayerError {
 pub enum Notice {
     /// A track failed to open or to play. `reason` is safe to show on the chat.
     CouldNotPlay { title: String, reason: String },
+    /// The sound of an event played to its end, or failed while playing.
+    SoundEnded,
+    /// The sound of an event was stopped before its end: `next`, `clear`, `stop_sound`
+    /// or another sound.
+    SoundInterrupted,
 }
 
 /// The result of `Player::enqueue`.
@@ -124,11 +129,24 @@ impl Player {
         std::mem::take(&mut self.notices)
     }
 
-    /// The current track, `None` while idle.
+    /// Music plays. A paused track and the sound of an event do not count.
+    pub fn is_playing(&self) -> bool {
+        matches!(&self.state, State::Playing(playback) if playback.kind == Kind::Track)
+    }
+
+    pub fn queue_is_empty(&self) -> bool {
+        self.queue.is_empty()
+    }
+
+    /// Nothing plays and nothing is paused.
+    pub fn is_idle(&self) -> bool {
+        matches!(self.state, State::Idle)
+    }
+
+    /// The current track. `None` while idle or while the sound of an event plays.
     pub fn current(&self) -> Option<Current<'_>> {
         match &self.state {
-            State::Idle => None,
-            State::Playing(playback) => Some(Current {
+            State::Playing(playback) if playback.kind == Kind::Track => Some(Current {
                 track: &playback.track,
                 paused: false,
             }),
@@ -136,6 +154,7 @@ impl Player {
                 track: &playback.track,
                 paused: true,
             }),
+            _ => None,
         }
     }
 }
@@ -145,7 +164,15 @@ impl Player {
 impl Player {
     pub(crate) fn playing(&self) -> Option<&str> {
         match &self.state {
-            State::Playing(playback) => Some(&playback.track.title),
+            State::Playing(playback) if playback.kind == Kind::Track => Some(&playback.track.title),
+            _ => None,
+        }
+    }
+
+    /// The title of the event sound that plays now.
+    pub(crate) fn sound(&self) -> Option<&str> {
+        match &self.state {
+            State::Playing(playback) if playback.kind == Kind::Sound => Some(&playback.track.title),
             _ => None,
         }
     }
@@ -155,11 +182,6 @@ impl Player {
             State::Paused(playback) => Some(&playback.track.title),
             _ => None,
         }
-    }
-
-    /// Nothing plays and nothing is paused.
-    pub(crate) fn is_idle(&self) -> bool {
-        matches!(self.state, State::Idle)
     }
 
     pub(crate) fn current_id(&self) -> PlaybackId {

@@ -22,10 +22,19 @@ pub(super) struct Playback {
     pub(super) id: PlaybackId,
     pub(super) stop: CancellationToken,
     pub(super) track: TrackRef,
+    pub(super) kind: Kind,
 }
 
-/// `Default` (`Idle`) is required by `mem::take`.
-// TODO: `Departing` for presence.
+/// What plays: music from the queue, or the sound of an event.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Kind {
+    Track,
+    /// Not music: does not count as playing, is not shown, cannot be paused, and its end
+    /// is reported to the bot instead of starting the next track.
+    Sound,
+}
+
+/// `Default` (`Idle`) is required by `mem::take`. Only a track is ever `Paused`.
 #[derive(Debug, Default)]
 pub(super) enum State {
     #[default]

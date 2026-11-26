@@ -1,4 +1,5 @@
 mod commands;
+mod events;
 mod harness;
 mod lookups;
 mod outbox;

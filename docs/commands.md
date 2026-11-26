@@ -24,12 +24,17 @@ Commands are grouped into three families:
   - **drag it** to your channel (recommended; requires the matching server permissions), or
   - send it `!bot summon` in a **private message** and it will join your channel.
 - While the bot is in someone else's channel, it is **busy**: people outside that channel cannot move it or control it. Only admins can.
-- When the bot joins a channel with people in it, it plays a short **welcome** sound.
+- When the bot joins a channel with people in it, it may play a **welcome** sound, depending on its setup. Songs you add meanwhile start right after it; a paused song is not interrupted.
 - The bot leaves on its own and returns to its home channel when:
   - nothing has been playing for **10 minutes** (a paused song counts as nothing playing), or
   - it has been **alone** in the channel for **1 minute**.
 
-  Before leaving, it plays a **goodbye** sound. Starting a song while the goodbye is playing cancels the return. When the bot returns home, **the queue is cleared**.
+  Before leaving, it may play a **goodbye** sound. While the goodbye plays:
+  - adding or resuming a song cancels the return, the bot stays;
+  - `!song next` or `!queue clear` skips the goodbye, the bot leaves at once;
+  - dragging the bot to another channel cancels the return.
+
+  When the bot arrives home, however it got there, **the queue is cleared**. If the bot is left playing music to an empty home channel, it stops after 1 minute.
 
 ## Who can use commands
 

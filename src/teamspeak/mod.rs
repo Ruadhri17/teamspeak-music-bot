@@ -16,7 +16,7 @@ mod request;
 mod tests;
 
 pub use error::{TeamspeakError, TeamspeakResult};
-pub use event::{Author, ReplyTo, TeamspeakEvent};
+pub use event::{Author, CurrentChannel, ReplyTo, TeamspeakEvent};
 pub use request::TeamspeakRequest;
 
 use std::{collections::HashMap, path::PathBuf, time::Duration};
@@ -32,10 +32,9 @@ use tokio::{
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 use tsclientlib::{
-    ChannelId, CommandError, Connection, DisconnectOptions, InMessage, Invoker, MessageHandle,
-    OutCommandExt, Reason, StreamItem, data,
+    ChannelId, ClientType, CommandError, Connection, DisconnectOptions, InMessage, Invoker,
+    MessageHandle, OutCommandExt, Reason, StreamItem, data,
     events::{Event, PropertyId},
-    prelude::M2BClientEditExt,
 };
 use tsproto_packets::packets::{AudioData, CodecType, OutAudio};
 
@@ -92,6 +91,8 @@ pub struct Client {
     home_config: Option<ChannelRef>,
     /// Known once connected, forgotten on a reconnect.
     home: Option<ChannelId>,
+    /// The bot's channel as last sent to the bot, so only changes go out.
+    last_channel: Option<CurrentChannel>,
     description: String,
     permissions: PermissionsConfig,
     /// The warning about group names that cannot work was logged.
@@ -129,6 +130,7 @@ impl Client {
             identity_path,
             home_config: config.teamspeak.home_channel.clone(),
             home: None,
+            last_channel: None,
             description: config.teamspeak.description.clone(),
             permissions: config.permissions.clone(),
             warned_group_names: false,
@@ -185,15 +187,23 @@ impl Client {
 
     fn handle_item(&mut self, item: StreamItem) {
         match item {
-            StreamItem::BookEvents(events) => self.forward_events(events),
+            StreamItem::BookEvents(events) => {
+                self.forward_events(events);
+                self.report_channel();
+            }
             // The channel tree is complete only after this, earlier book events have a part of it.
-            StreamItem::MessageEvent(InMessage::ChannelListFinished(_)) => self.on_connected(),
+            StreamItem::MessageEvent(InMessage::ChannelListFinished(_)) => {
+                self.on_connected();
+                self.report_channel();
+            }
             StreamItem::IdentityLevelIncreased => self.save_identity(),
             StreamItem::MessageResult(handle, result) => self.command_done(handle, result),
             // tsclientlib reconnects on its own, the setup runs again after that.
             StreamItem::DisconnectedTemporarily(reason) => {
                 warn!("disconnected from the server ({reason:?}), reconnecting");
                 self.home = None;
+                // After the reconnect the channel is sent again, even if it is the same.
+                self.last_channel = None;
                 // Commands of the old connection get no answer.
                 self.sent.clear();
             }
@@ -226,16 +236,7 @@ impl Client {
         let Ok(state) = self.connection.get_state() else {
             return;
         };
-        let channels: Vec<ChannelInfo> = state
-            .channels
-            .values()
-            .map(|channel| ChannelInfo {
-                id: channel.id.0,
-                parent: channel.parent.0,
-                name: &channel.name,
-                is_default: channel.is_default.unwrap_or(false),
-            })
-            .collect();
+        let channels = channel_infos(state);
         let current = state.clients.get(&state.own_client).map(|bot| bot.channel);
 
         let home = match home::resolve(self.home_config.as_ref(), &channels) {
@@ -284,21 +285,17 @@ impl Client {
         // Clients in other channels are only visible in subscribed channels, `!bot summon`
         // needs the sender's channel. tsclientlib subscribes new channels on its own after this.
         let subscribe = state.server.set_subscribed(true);
-        // A copy, so the command does not borrow `self` while the results are tracked.
-        let description = self.description.clone();
-        let edit = state
-            .clients
-            .get(&state.own_client)
-            .map(|bot| bot.edit().set_description(&description));
         match subscribe.send_with_result(&mut self.connection) {
             Ok(handle) => self.track(Some((handle, "subscribing to all channels"))),
             Err(err) => warn!("could not subscribe to all channels: {err}"),
         }
-        if let Some(edit) = edit {
-            match edit.send_with_result(&mut self.connection) {
-                Ok(handle) => self.track(Some((handle, "setting the description"))),
-                Err(err) => warn!("the description could not be set: {err}"),
-            }
+
+        // The same request as an event's `description`, so both behave alike.
+        // After a reconnect this sets the description from the config again.
+        let description = TeamspeakRequest::SetDescription(self.description.clone());
+        match request::execute(&mut self.connection, self.home, description) {
+            Ok(sent) => self.track(sent),
+            Err(err) => warn!("{:#}", anyhow::Error::from(err)),
         }
     }
 
@@ -348,6 +345,33 @@ impl Client {
                 // The receiver is gone, which only happens during shutdown.
                 Err(TrySendError::Closed(_)) => {}
             }
+        }
+    }
+
+    /// Sends the bot's channel when it changed: the bot moved, or someone came or left.
+    /// Waits for the home channel, `at_home` needs it. Never waits for the bot, like
+    /// `forward_events`.
+    fn report_channel(&mut self) {
+        let Some(home) = self.home else {
+            return;
+        };
+        let Ok(state) = self.connection.get_state() else {
+            return;
+        };
+        let Some(current) = current_channel(state, home) else {
+            return;
+        };
+        if self.last_channel == Some(current) {
+            return;
+        }
+        match self.events.try_send(TeamspeakEvent::Channel(current)) {
+            Ok(()) => self.last_channel = Some(current),
+            // Not remembered as sent, so the next change on the server sends it again.
+            Err(TrySendError::Full(_)) => {
+                warn!("the bot is not keeping up, a change in its channel was not reported")
+            }
+            // The receiver is gone, which only happens during shutdown.
+            Err(TrySendError::Closed(_)) => {}
         }
     }
 
@@ -490,6 +514,42 @@ fn warn_unseen_group_names(state: &data::Connection, config: &PermissionsConfig)
             unseen.join(", ")
         );
     }
+}
+
+/// Where the bot is and how many people are with it. Server query clients are not people.
+/// `None` while the bot itself is not in the state yet.
+fn current_channel(state: &data::Connection, home: ChannelId) -> Option<CurrentChannel> {
+    let channel = state.clients.get(&state.own_client)?.channel;
+    let others = state
+        .clients
+        .values()
+        .filter(|client| {
+            client.id != state.own_client
+                && client.channel == channel
+                && matches!(client.client_type, ClientType::Normal)
+        })
+        .count();
+    Some(CurrentChannel {
+        id: channel.0,
+        at_home: channel == home,
+        others,
+    })
+}
+
+/// Every channel on the server, for finding one from the config by ID or path.
+/// Borrows the names from `state`, so the list lives only as long as that borrow.
+fn channel_infos(state: &data::Connection) -> Vec<ChannelInfo<'_>> {
+    state
+        .channels
+        .values()
+        .map(|channel| ChannelInfo {
+            id: channel.id.0,
+            // 0 for a top-level channel.
+            parent: channel.parent.0,
+            name: &channel.name,
+            is_default: channel.is_default.unwrap_or(false),
+        })
+        .collect()
 }
 
 /// `kicked by Admin`, `banned by Admin`, or the reason as tsclientlib names it.
