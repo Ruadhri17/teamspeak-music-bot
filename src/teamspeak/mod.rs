@@ -19,7 +19,7 @@ pub use error::{TeamspeakError, TeamspeakResult};
 pub use event::{Author, ReplyTo, TeamspeakEvent};
 pub use request::TeamspeakRequest;
 
-use std::{collections::HashMap, path::PathBuf};
+use std::{collections::HashMap, path::PathBuf, time::Duration};
 
 use futures::{StreamExt, future};
 use tokio::{
@@ -27,7 +27,7 @@ use tokio::{
         mpsc::{self, error::TrySendError},
         watch,
     },
-    time::MissedTickBehavior,
+    time::{Instant, MissedTickBehavior},
 };
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
@@ -47,6 +47,9 @@ use crate::{
     permissions::{self, Group},
     secrets::{TeamspeakSecrets, identity},
 };
+
+/// How late a tick may be before the 20 ms grid starts over instead of making up for it.
+const RESYNC_AFTER: Duration = Duration::from_millis(200);
 
 /// What the client sends right now. Set by the player, read every tick.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -140,7 +143,10 @@ impl Client {
     /// so no branch may block for long.
     pub async fn run(mut self) -> TeamspeakResult<()> {
         let mut ticker = tokio::time::interval(FRAME_DURATION);
-        ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
+        // Keeps the 20 ms grid: a late tick is made up by sending the missed frames at once.
+        // `Delay` would start a new grid from each late tick, so every hiccup would send
+        // a bit less audio than real time and the listeners' buffers would slowly run dry.
+        ticker.set_missed_tick_behavior(MissedTickBehavior::Burst);
 
         loop {
             tokio::select! {
@@ -160,7 +166,16 @@ impl Client {
                         Err(err) => warn!("{:#}", anyhow::Error::from(err)),
                     }
                 }
-                _ = ticker.tick() => self.send_frame(),
+                scheduled = ticker.tick() => {
+                    let late = Instant::now().saturating_duration_since(scheduled);
+                    if late > RESYNC_AFTER {
+                        // After a long stall (a suspended host, an overloaded VPS) making up
+                        // for it would send seconds of audio at once, so the grid starts over.
+                        warn!("the audio clock was {late:?} late, starting it over");
+                        ticker.reset();
+                    }
+                    self.send_frame();
+                }
                 _ = self.shutdown.cancelled() => break,
             }
         }
