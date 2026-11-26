@@ -83,6 +83,10 @@ pub struct Player {
     /// Tracks that finished decoding while their end is still in the buffer, oldest first.
     /// The first one is heard now, before the track of `state`.
     tails: VecDeque<Playback>,
+    /// The client sent the last frame of the current track before the player heard that
+    /// it finished decoding: the two come through different channels. Its `finished`
+    /// then moves on at once instead of waiting for an end that already came.
+    played_early: Option<state::PlaybackId>,
     /// Songs after the current one.
     queue: Queue,
     /// The ID for the next playback, only ever goes up.
@@ -115,6 +119,7 @@ impl Player {
         Self {
             state: State::Idle,
             tails: VecDeque::new(),
+            played_early: None,
             queue: Queue::new(config.queue.max_len),
             next_id: 0,
             launcher,
@@ -195,6 +200,12 @@ impl Player {
             }
             _ => None,
         }
+    }
+
+    /// Only the end of a decoded track is left and the client holds it: `pause` while
+    /// nothing decodes any more.
+    fn tail_paused(&self) -> bool {
+        matches!(self.state, State::Idle) && !self.tails.is_empty() && self.control.borrow().paused
     }
 
     /// A track is heard now: the oldest tail, or the playing track when no tail is left.

@@ -33,20 +33,26 @@ impl Player {
             }
             added += 1;
             // Started one by one, so the first track leaves the queue before the next ones
-            // are counted against its limit.
-            if let State::Idle = self.state {
+            // are counted against its limit. A paused end of a track keeps its pause, the
+            // new track waits for `resume`.
+            if matches!(self.state, State::Idle) && !self.tail_paused() {
                 self.play_next();
             }
         }
         Enqueued { added, full: None }
     }
 
-    /// Pauses a playing track, otherwise does nothing. The sound of an event is not paused.
+    /// Pauses a playing track, also when only its end is left in the buffer. Otherwise
+    /// does nothing, the sound of an event is not paused.
     pub fn pause(&mut self) {
         self.state = match mem::take(&mut self.state) {
             State::Playing(playback) if playback.kind == Kind::Track => {
                 self.control.send_modify(|control| control.paused = true);
                 State::Paused(playback)
+            }
+            State::Idle if !self.tails.is_empty() => {
+                self.control.send_modify(|control| control.paused = true);
+                State::Idle
             }
             other => other,
         };
@@ -142,6 +148,7 @@ impl Player {
         // drops their buffered frames and plays only the streams started from now on.
         // The ends of decoded tracks go with them.
         self.tails.clear();
+        self.played_early = None;
         let min_stream_id = self.next_id;
         self.control.send_modify(|control| {
             control.min_stream_id = min_stream_id;
@@ -169,6 +176,9 @@ impl Player {
             return;
         }
         let failed = failure.is_some();
+        // Heard to its end already, there is no end left to wait for.
+        let played = self.played_early.take_if(|early| *early == id).is_some();
+        let tail = !failed && !played;
         if let (Some(playback), Some(reason)) = (self.state.playback(), failure)
             && playback.id == id
         {
@@ -180,14 +190,14 @@ impl Player {
         match mem::take(&mut self.state) {
             // `stop_current` is not used, the buffered end must play before the next track.
             State::Playing(playback) if playback.id == id => {
-                if !failed {
+                if tail {
                     self.tails.push_back(playback);
                 }
                 self.play_next();
             }
             // Advancing would cancel the pause, playback continues on `resume`.
             State::Paused(playback) if playback.id == id => {
-                if !failed {
+                if tail {
                     self.tails.push_back(playback);
                 }
             }
@@ -210,8 +220,18 @@ impl Player {
         while self.tails.front().is_some_and(|tail| tail.id.0 <= stream) {
             self.tails.pop_front();
         }
-        if self.tails.len() < before && self.track_heard() {
-            self.notices.push(Notice::SongStarted);
+        if self.tails.len() < before {
+            if self.track_heard() {
+                self.notices.push(Notice::SongStarted);
+            }
+            return;
+        }
+        // The end came before `finished`, which then must not wait for it.
+        if let Some(playback) = self.state.playback()
+            && playback.kind == Kind::Track
+            && playback.id.0 == stream
+        {
+            self.played_early = Some(playback.id);
         }
     }
 

@@ -229,14 +229,60 @@ async fn resume_after_finishing_while_paused_starts_the_queue() {
 }
 
 #[tokio::test]
-async fn add_after_finishing_while_paused_is_heard() {
+async fn add_after_finishing_while_paused_keeps_the_pause() {
     let mut h = Harness::new();
     h.add(&["a.mp3"]).await;
     h.send("!song pause");
     h.finish_current();
     h.add(&["b.mp3"]).await;
-    assert_eq!(h.playing(), Some("b"));
+    assert!(h.control().paused);
+    assert_eq!(h.playing(), None);
+    assert_eq!(h.queued(), ["b"]);
+    assert_eq!(h.send("!song current"), reply("a (paused)"));
+    assert_eq!(h.send("!song resume"), None);
     assert!(!h.control().paused);
+    assert_eq!(h.playing(), Some("b"));
+    assert_eq!(h.send("!song current"), reply("a"));
+}
+
+#[tokio::test]
+async fn pause_holds_the_end_of_the_last_track() {
+    let mut h = Harness::new();
+    h.add(&["a.mp3"]).await;
+    let a = h.current_id();
+    h.finish_current();
+    assert_eq!(h.send("!song pause"), None);
+    assert!(h.control().paused);
+    assert_eq!(h.send("!song current"), reply("a (paused)"));
+    assert!(!h.bot.player.is_playing());
+    assert_eq!(h.send("!song resume"), None);
+    assert!(!h.control().paused);
+    assert_eq!(h.send("!song current"), reply("a"));
+    h.played(a);
+    assert!(h.is_idle());
+}
+
+#[tokio::test]
+async fn an_end_heard_before_the_end_of_decoding_does_not_get_stuck() {
+    let mut h = Harness::new();
+    h.add(&["a.mp3"]).await;
+    let a = h.current_id();
+    h.played(a);
+    h.finish_current_id(a);
+    assert!(h.is_idle());
+    assert_eq!(h.send("!song current"), reply("nothing is playing"));
+}
+
+#[tokio::test]
+async fn an_end_heard_before_the_end_of_decoding_moves_on_to_the_next_song() {
+    let mut h = Harness::new();
+    h.add(&["a.mp3", "b.mp3"]).await;
+    let a = h.current_id();
+    h.played(a);
+    h.finish_current_id(a);
+    assert_eq!(h.playing(), Some("b"));
+    assert_eq!(h.send("!song current"), reply("b"));
+    assert_eq!(h.send("!queue show"), reply("Now: b\nthe queue is empty"));
 }
 
 #[tokio::test]

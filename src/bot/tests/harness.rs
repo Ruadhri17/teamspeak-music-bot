@@ -191,6 +191,10 @@ impl Harness {
         self.bot.finished(Ended { id, failure: None });
     }
 
+    pub fn finish_current_id(&mut self, id: PlaybackId) {
+        self.bot.finished(Ended { id, failure: None });
+    }
+
     pub fn track_heard(&mut self) {
         let id = self.current_id();
         self.finish_current();
