@@ -39,6 +39,18 @@ pub const FRAME_DURATION: Duration = Duration::from_millis(20);
 pub const SAMPLES_PER_CHANNEL: usize = SAMPLE_RATE * FRAME_DURATION.as_millis() as usize / 1000;
 /// One frame, interleaved (left, right, left, ...).
 pub const FRAME_SAMPLES: usize = SAMPLES_PER_CHANNEL * CHANNELS;
+/// The most audio `audio.max_buffer` may hold, a full buffer of it takes about 23 MB.
+pub const MAX_BUFFER: Duration = Duration::from_secs(60);
+
+/// How many frames `duration` of audio takes, at least one.
+pub fn frames_in(duration: Duration) -> usize {
+    let frames = duration
+        .as_micros()
+        .div_ceil(FRAME_DURATION.as_micros())
+        .max(1);
+    usize::try_from(frames).unwrap_or(usize::MAX)
+}
+
 /// Audio data from any source, always given to ffmpeg on its stdin, never as a path or URL.
 pub enum AudioInput {
     /// A seekable file, becomes ffmpeg's stdin directly. Seeking is needed by formats

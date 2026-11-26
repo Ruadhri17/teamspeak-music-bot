@@ -145,7 +145,8 @@ async fn run(location: &ConfigLocation, log_level: Option<LogLevel>) -> anyhow::
 
     let (events_tx, events_rx) = mpsc::channel(64);
     let (requests_tx, requests_rx) = mpsc::channel(64);
-    let (frames_tx, frames_rx) = mpsc::channel(250);
+    // `audio.max_buffer` of audio waits for the client, the audio thread blocks when it is full.
+    let (frames_tx, frames_rx) = mpsc::channel(audio::frames_in(config.audio.max_buffer));
 
     let (control_tx, control_rx) = watch::channel(AudioControl::default());
 

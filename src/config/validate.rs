@@ -2,6 +2,8 @@ use std::{ops::RangeInclusive, path::Path};
 
 use humantime::format_duration;
 
+use crate::audio::MAX_BUFFER;
+
 use super::{
     AudioConfig, ChannelRef, Config, Destination, Event, EventsConfig, Sound, TeamspeakConfig,
 };
@@ -82,6 +84,9 @@ fn audio(audio: &AudioConfig) -> Result<(), ValidationError> {
         },
     )?;
 
+    ensure(audio.max_buffer <= MAX_BUFFER, "audio.max_buffer", || {
+        format!("must not be greater than {}", format_duration(MAX_BUFFER))
+    })?;
     ensure(!audio.max_buffer.is_zero(), "audio.max_buffer", || {
         "must be greater than 0".into()
     })?;

@@ -277,3 +277,13 @@ fn empty_event_description_clears_it() {
     config.events.on_party.nickname = Some("Music Bot".into());
     assert!(validate(&config).is_ok());
 }
+
+#[test]
+fn max_buffer_has_an_upper_limit() {
+    assert!(validate(&with_buffers(3, 60)).is_ok());
+    let err = validate(&with_buffers(3, 61)).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "audio.max_buffer: must not be greater than 1m"
+    );
+}
