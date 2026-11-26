@@ -28,9 +28,19 @@ pub(super) struct Pending {
 
 impl Bot {
     /// `!song add`. Starts the lookup, `lookup_done` queues the track in the order of the commands.
+    /// The lookup waits for a free slot first, so a burst of commands starts at most
+    /// `sources.max_parallel_lookups` processes. A waiting lookup is only a sleeping task.
     pub(super) fn add(&mut self, query: QueryType, source: Option<SourceKind>, reply_to: ReplyTo) {
         let sources = Arc::clone(&self.sources);
-        let task = self.lookups.spawn(resolve(sources, query, source)).id();
+        let slots = Arc::clone(&self.lookup_slots);
+        let task = self
+            .lookups
+            .spawn(async move {
+                // The semaphore is never closed. Waiting is fair, the oldest lookup goes first.
+                let _slot = slots.acquire_owned().await.expect("never closed");
+                resolve(sources, query, source).await
+            })
+            .id();
         self.pending.push_back(Pending {
             task,
             reply_to,

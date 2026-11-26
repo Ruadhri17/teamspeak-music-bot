@@ -242,6 +242,9 @@ pub struct SourcesConfig {
     pub default: SourceKind,
     /// The most tracks one playlist link adds, the rest of the playlist is left out.
     pub max_playlist_len: NonZeroUsize,
+    /// How many `!song add` lookups run at the same time, the rest wait their turn.
+    /// Each one is a `yt-dlp` process, so this bounds the memory a burst of commands takes.
+    pub max_parallel_lookups: NonZeroUsize,
     pub tidal: TidalConfig,
     pub youtube: YoutubeConfig,
     pub local: LocalConfig,
@@ -252,6 +255,7 @@ impl Default for SourcesConfig {
         Self {
             default: SourceKind::default(),
             max_playlist_len: NonZeroUsize::new(100).unwrap(),
+            max_parallel_lookups: NonZeroUsize::new(2).unwrap(),
             tidal: TidalConfig::default(),
             youtube: YoutubeConfig::default(),
             local: LocalConfig::default(),

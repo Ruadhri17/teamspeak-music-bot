@@ -30,7 +30,7 @@ use crate::{
 use actions::SoundLookup;
 use lookups::Pending;
 use tokio::{
-    sync::{mpsc, watch},
+    sync::{Semaphore, mpsc, watch},
     task::JoinSet,
     time::{Instant, sleep_until},
 };
@@ -50,6 +50,8 @@ pub struct Bot {
     lookups: JoinSet<Result<Found, String>>,
     /// The lookups in the order of the commands, a finished one waits for those before it.
     pending: VecDeque<Pending>,
+    /// Lets `sources.max_parallel_lookups` lookups run at once, the others wait in order.
+    lookup_slots: Arc<Semaphore>,
     /// From the client: chat messages with commands and changes in the bot's channel.
     teamspeak_events: mpsc::Receiver<TeamspeakEvent>,
     /// To the client: chat messages, moving the bot and the like.
@@ -81,6 +83,7 @@ impl Bot {
             waiting: None,
             lookups: JoinSet::new(),
             pending: VecDeque::new(),
+            lookup_slots: Arc::new(Semaphore::new(config.sources.max_parallel_lookups.get())),
             teamspeak_events,
             teamspeak_requests,
             outbox: Vec::new(),

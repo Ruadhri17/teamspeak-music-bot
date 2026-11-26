@@ -145,3 +145,45 @@ async fn queue_clear_cancels_lookups_and_kills_yt_dlp() {
     assert!(h.queued().is_empty());
     assert!(h.outbox().is_empty());
 }
+
+const COUNTING: &str = r#"
+for arg; do target=$arg; done
+phrase=${target#ytsearch1:}
+dir=$(dirname "$0")
+mkdir "$dir/running.$phrase"
+others=$(ls -d "$dir"/running.* | wc -l)
+echo "$others" >> "$dir/at_once"
+sleep 0.2
+rmdir "$dir/running.$phrase"
+printf '{"_type": "video", "id": "aaaaaaaaaaa", "title": "%s"}' "$phrase"
+"#;
+
+async fn most_at_once(parallel: usize) -> usize {
+    let mut h = Harness::with_yt_dlp_and(COUNTING, |config| {
+        config.sources.max_parallel_lookups = parallel.try_into().unwrap();
+    });
+    for name in ["one", "two", "three", "four"] {
+        assert_eq!(h.send(&format!("!song add {name}")), None);
+    }
+    h.settle().await;
+    assert_eq!(h.playing(), Some("one"));
+    assert_eq!(h.queued(), ["two", "three", "four"]);
+    let log = h.scripts.as_ref().unwrap().path().join("at_once");
+    fs::read_to_string(log)
+        .unwrap()
+        .lines()
+        .map(|line| line.trim().parse::<usize>().unwrap())
+        .max()
+        .unwrap()
+}
+
+#[tokio::test]
+async fn lookups_wait_for_a_free_slot() {
+    assert_eq!(most_at_once(1).await, 1);
+    assert!(most_at_once(2).await <= 2);
+}
+
+#[tokio::test]
+async fn enough_slots_run_lookups_together() {
+    assert!(most_at_once(4).await > 1);
+}
