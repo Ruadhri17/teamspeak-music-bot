@@ -1,6 +1,13 @@
 use std::{path::PathBuf, time::Duration};
 
-use crate::config::{ChannelRef, Config, Destination, Sound, Volume, validate::validate};
+use crate::{
+    config::{ChannelRef, Config, Destination, Sound, Volume, validate::validate},
+    template::Template,
+};
+
+fn text(text: &str) -> Option<Template> {
+    Some(text.parse().unwrap())
+}
 
 fn with_volumes(default: u8, max: u8) -> Config {
     let mut config = Config::default();
@@ -155,22 +162,22 @@ fn empty_optional_values_are_rejected() {
             c.events.on_party.sound = Some(Sound::File(PathBuf::new()))
         }),
         ("events.on_connect.message", |c| {
-            c.events.on_connect.message = Some(String::new())
+            c.events.on_connect.message = text("")
         }),
         ("events.on_disconnect.message", |c| {
             c.events.on_disconnect.message = Some(" ".into())
         }),
         ("events.on_idle.message", |c| {
-            c.events.on_idle.message = Some(String::new())
+            c.events.on_idle.message = text("")
         }),
         ("events.on_alone.message", |c| {
-            c.events.on_alone.message = Some(String::new())
+            c.events.on_alone.message = text("")
         }),
         ("events.on_party.message", |c| {
-            c.events.on_party.message = Some(String::new())
+            c.events.on_party.message = text("")
         }),
         ("events.on_song_start.message", |c| {
-            c.events.on_song_start.message = Some(String::new())
+            c.events.on_song_start.message = text("")
         }),
     ]);
 }
@@ -178,7 +185,7 @@ fn empty_optional_values_are_rejected() {
 #[test]
 fn empty_optional_value_error_message_has_hint() {
     let mut config = Config::default();
-    config.events.on_idle.message = Some(String::new());
+    config.events.on_idle.message = text("");
     assert_eq!(
         validate(&config).unwrap_err().to_string(),
         "events.on_idle.message: must not be empty, remove the line to turn it off"
@@ -190,8 +197,8 @@ fn filled_optional_values_are_valid() {
     let mut config = Config::default();
     config.sources.local.music_dir = Some("music".into());
     config.events.on_idle.sound = Some(Sound::File("bye.wav".into()));
-    config.events.on_idle.message = Some("See you later".into());
-    config.events.on_song_start.message = Some("Now playing: {title}".into());
+    config.events.on_idle.message = text("See you later");
+    config.events.on_song_start.message = text("Now playing: {song} from {source}");
     assert!(validate(&config).is_ok());
 }
 
@@ -249,10 +256,10 @@ fn player_clients_may_be_empty_or_several() {
 fn event_actions_are_checked() {
     assert_each_rejected(&[
         ("events.on_party.nickname", |c| {
-            c.events.on_party.nickname = Some("ab".into())
+            c.events.on_party.nickname = text("ab")
         }),
         ("events.on_idle.nickname", |c| {
-            c.events.on_idle.nickname = Some(" ".into())
+            c.events.on_idle.nickname = text(" ")
         }),
         ("events.on_alone.move_to", |c| {
             c.events.on_alone.move_to = Some(Destination::Channel(ChannelRef::Name(" ".into())))
@@ -273,8 +280,8 @@ fn written_leaving_event_needs_its_delay() {
 #[test]
 fn empty_event_description_clears_it() {
     let mut config = Config::default();
-    config.events.on_party.description = Some(String::new());
-    config.events.on_party.nickname = Some("Music Bot".into());
+    config.events.on_party.description = text("");
+    config.events.on_party.nickname = text("Music Bot");
     assert!(validate(&config).is_ok());
 }
 
@@ -285,5 +292,56 @@ fn max_buffer_has_an_upper_limit() {
     assert_eq!(
         err.to_string(),
         "audio.max_buffer: must not be greater than 1m"
+    );
+}
+
+#[test]
+fn placeholders_are_checked_against_their_event_and_field() {
+    assert_each_rejected(&[
+        ("events.on_party.message", |c| {
+            c.events.on_party.message = text("Now playing: {song}")
+        }),
+        ("events.on_idle.description", |c| {
+            c.events.on_idle.description = text("from {source}")
+        }),
+        ("events.on_song_start.message", |c| {
+            c.events.on_song_start.message = text("{default}")
+        }),
+    ]);
+}
+
+#[test]
+fn placeholder_errors_say_where_they_work() {
+    let mut config = Config::default();
+    config.events.on_connect.message = text("{default} is here");
+    assert_eq!(
+        validate(&config).unwrap_err().to_string(),
+        "events.on_connect.message: {default} works only in description and nickname"
+    );
+    config.events.on_connect.message = text("Playing {song}");
+    assert_eq!(
+        validate(&config).unwrap_err().to_string(),
+        "events.on_connect.message: {song} works only in on_song_start"
+    );
+}
+
+#[test]
+fn placeholders_where_they_fit_are_valid() {
+    let mut config = Config::default();
+    config.events.on_song_start.message = text("Now playing: {song} from {source}");
+    config.events.on_song_start.description = text("{default} | {song}");
+    config.events.on_song_start.nickname = text("{song}");
+    config.events.on_idle.nickname = text("{default}");
+    config.events.on_party.description = text("{default} (busy)");
+    assert!(validate(&config).is_ok());
+}
+
+#[test]
+fn song_start_cannot_play_a_sound() {
+    let mut config = Config::default();
+    config.events.on_song_start.sound = Some(Sound::File("jingle.wav".into()));
+    assert_eq!(
+        validate(&config).unwrap_err().to_string(),
+        "events.on_song_start.sound: on_song_start cannot play a sound, the song already plays"
     );
 }

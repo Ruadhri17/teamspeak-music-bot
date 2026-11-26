@@ -41,13 +41,19 @@ pause_release_after = "5m"          # [live] release the stream after being paus
 # They run in this order, the rest waits for the end of the sound.
 # A written event section has only the actions it lists.
 # Description and nickname stay as an event set them, another event may set them back.
+# Placeholders in the texts:
+#   {default}    in description and nickname: the value from [teamspeak]
+#   {song}       in on_song_start: the song, as !song current shows it
+#   {source}     in on_song_start: where the song comes from, e.g. YouTube
+# A nickname with placeholders is cut to 30 characters.
 # Arriving home always clears the queue. Music playing for nobody at home stops
 # after on_alone's delay.
 
-[events.on_connect]                 # bot connected to the server (not implemented yet)
+[events.on_connect]                 # bot connected to the server, also after a reconnect
 # message = "Hello!"                # [live]
+# nickname = "{default}"            # [live]
 
-[events.on_disconnect]              # bot disconnects on shutdown, no other actions (not implemented yet)
+[events.on_disconnect]              # bot disconnects on shutdown, no other actions, no placeholders
 # message = "See you later"         # [live] disconnect reason shown to users
 
 [events.on_idle]                    # nothing played for `delay` away from home (pause counts as idle)
@@ -65,8 +71,9 @@ move_to = "home"                    # [live]
 # sound = "/home/tsmusic/channel-music/welcome.wav"   # [live] played before the queue
 # description = "Playing music, drag me to your channel when I am home"   # [live]
 
-[events.on_song_start]              # a new song started, texts may use {title} {artist} {source} (not implemented yet)
-# message = "Now playing: {artist} - {title}"         # [live]
+[events.on_song_start]              # a song from the queue started, every action except sound
+# message = "Now playing: {song}"   # [live]
+# description = "{default} | now: {song}"             # [live]
 
 [queue]
 # max_len = 1000                    # [live] not set = unlimited

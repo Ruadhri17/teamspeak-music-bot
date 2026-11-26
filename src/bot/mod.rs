@@ -64,6 +64,9 @@ pub struct Bot {
     sources: Arc<SourcesConfig>,
     /// Entries per page in `!queue show`.
     page_size: NonZeroUsize,
+    /// `teamspeak.nickname` and `teamspeak.description`, for `{default}` in events.
+    default_nickname: String,
+    default_description: String,
 }
 
 impl Bot {
@@ -89,6 +92,8 @@ impl Bot {
             outbox: Vec::new(),
             sources,
             page_size: config.queue.show_page_size,
+            default_nickname: config.teamspeak.nickname.clone(),
+            default_description: config.teamspeak.description.clone(),
         };
         bot.prepare_sounds();
         bot
@@ -151,6 +156,10 @@ impl Bot {
                 let actions = self.events.channel(current, Instant::now());
                 self.run_actions(actions);
             }
+            TeamspeakEvent::Connected => {
+                let actions = self.events.connected(Instant::now());
+                self.run_actions(actions);
+            }
         }
     }
 
@@ -175,6 +184,10 @@ impl Bot {
                     Notice::CouldNotPlay { title, reason } => {
                         let text = format!("could not play {}: {reason}", chat::escape(&title));
                         self.say(ReplyTo::Channel, text);
+                    }
+                    Notice::SongStarted => {
+                        let actions = self.events.song_started(Instant::now());
+                        self.run_actions(actions);
                     }
                     Notice::SoundEnded => self.sound_ended(),
                     Notice::SoundInterrupted => self.sound_interrupted(),

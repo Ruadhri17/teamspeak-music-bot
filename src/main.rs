@@ -15,6 +15,7 @@ mod process;
 mod secrets;
 mod sources;
 mod teamspeak;
+mod template;
 
 use std::{
     path::Path,

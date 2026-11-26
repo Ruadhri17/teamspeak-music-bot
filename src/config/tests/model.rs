@@ -251,3 +251,19 @@ fn sound_is_written_back_as_one_string() {
         assert_eq!(parse(&written).unwrap(), config, "{value}");
     }
 }
+
+#[test]
+fn event_texts_keep_their_placeholders() {
+    let config = parse("[events.on_song_start]\nmessage = \"Now playing: {song}\"\n").unwrap();
+    let message = config.events.on_song_start.message.unwrap();
+    assert_eq!(message.as_str(), "Now playing: {song}");
+}
+
+#[test]
+fn unknown_placeholder_is_a_config_error() {
+    let err = parse("[events.on_song_start]\nmessage = \"Now playing: {title}\"\n").unwrap_err();
+    assert!(
+        err.to_string().contains("unknown placeholder {title}"),
+        "{err}"
+    );
+}

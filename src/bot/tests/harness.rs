@@ -118,6 +118,10 @@ impl Harness {
         self.bot.handle_event(TeamspeakEvent::Channel(current));
     }
 
+    pub fn connected(&mut self) {
+        self.bot.handle_event(TeamspeakEvent::Connected);
+    }
+
     pub fn sound(&self) -> Option<&str> {
         self.bot.player.sound()
     }

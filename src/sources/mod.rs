@@ -25,6 +25,14 @@ pub struct TrackRef {
     pub title: String,
 }
 
+impl TrackRef {
+    /// How the song is shown: `!song current`, `!queue show` and `{song}` in events.
+    // TODO: `artist - title` for sources that know the artist (Spotify, Tidal, SoundCloud).
+    pub fn display_name(&self) -> &str {
+        &self.title
+    }
+}
+
 /// What a lookup found: one track, or the tracks of a playlist in order.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Found {
@@ -62,6 +70,17 @@ pub enum Location {
 
     Youtube(VideoId),
     // TODO: Tidal, Spotify, Soundcloud with their own IDs.
+}
+
+impl Location {
+    /// The source for `{source}` in events.
+    pub fn source_name(&self) -> &'static str {
+        match self {
+            Location::Local(_) => "local file",
+            Location::File(_) => "file",
+            Location::Youtube(_) => "YouTube",
+        }
+    }
 }
 
 /// What a search phrase looks for. Links carry their own type.

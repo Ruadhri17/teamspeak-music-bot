@@ -111,9 +111,9 @@ impl Bot {
         match self.player.current() {
             None => "nothing is playing".to_string(),
             Some(current) if current.paused => {
-                format!("{} (paused)", chat::escape(&current.track.title))
+                format!("{} (paused)", chat::escape(current.track.display_name()))
             }
-            Some(current) => chat::escape(&current.track.title).into_owned(),
+            Some(current) => chat::escape(current.track.display_name()).into_owned(),
         }
     }
 
@@ -125,7 +125,7 @@ impl Bot {
         };
         // Cut before escaping, see `chat::shorten`.
         let title = |track: &TrackRef| {
-            chat::escape(&chat::shorten(&track.title, QUEUE_TITLE_LEN)).into_owned()
+            chat::escape(&chat::shorten(track.display_name(), QUEUE_TITLE_LEN)).into_owned()
         };
 
         let mut lines = Vec::new();

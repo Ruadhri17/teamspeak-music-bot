@@ -382,3 +382,45 @@ fn done_for_a_party_changes_nothing() {
     clock.done(5, Trigger::Party);
     assert_eq!(clock.deadline(), Some(600));
 }
+
+#[test]
+fn connect_runs_after_its_delay_and_again_after_a_reconnect() {
+    let mut config = config();
+    config.on_connect.delay = secs(5);
+    let mut clock = Clock::with(config);
+    assert_eq!(clock.events.connected(clock.at(0)), []);
+    assert_eq!(clock.deadline(), Some(5));
+    assert_eq!(clock.tick(5), [Action::Run(Trigger::Connect)]);
+    assert_eq!(clock.tick(6), []);
+    assert_eq!(clock.events.connected(clock.at(100)), []);
+    assert_eq!(clock.tick(105), [Action::Run(Trigger::Connect)]);
+}
+
+#[test]
+fn connect_does_not_wait_for_the_channel() {
+    let start = Instant::now();
+    let mut events = Events::new(&config(), start);
+    assert_eq!(events.connected(start), [Action::Run(Trigger::Connect)]);
+}
+
+#[test]
+fn song_start_without_a_delay_runs_at_once() {
+    let mut clock = Clock::in_room(1);
+    let now = clock.at(10);
+    assert_eq!(
+        clock.events.song_started(now),
+        [Action::Run(Trigger::SongStart)]
+    );
+}
+
+#[test]
+fn a_newer_song_replaces_the_waiting_song_start() {
+    let mut config = config();
+    config.on_song_start.delay = secs(5);
+    let mut clock = Clock::in_room_with(config, 1);
+    assert_eq!(clock.events.song_started(clock.at(10)), []);
+    assert_eq!(clock.events.song_started(clock.at(12)), []);
+    assert_eq!(clock.deadline(), Some(17));
+    assert_eq!(clock.tick(15), []);
+    assert_eq!(clock.tick(17), [Action::Run(Trigger::SongStart)]);
+}

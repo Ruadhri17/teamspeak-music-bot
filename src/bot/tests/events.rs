@@ -5,7 +5,12 @@ use crate::{
     config::{Destination, Event, Sound},
     events::{Action, Trigger},
     teamspeak::{CurrentChannel, ReplyTo, TeamspeakRequest},
+    template::Template,
 };
+
+fn text(text: &str) -> Option<Template> {
+    Some(text.parse().unwrap())
+}
 
 const GO_HOME: TeamspeakRequest = TeamspeakRequest::Move(Destination::Home);
 
@@ -24,7 +29,7 @@ fn with_sounds() -> Harness {
     Harness::with_config_in(|config, dir| {
         let goodbye = Event {
             delay: Duration::from_secs(60),
-            message: Some("bye".into()),
+            message: text("bye"),
             sound: Some(Sound::File(dir.join("bye.wav"))),
             move_to: Some(Destination::Home),
             ..Event::default()
@@ -33,7 +38,7 @@ fn with_sounds() -> Harness {
         config.events.on_idle = goodbye;
         config.events.on_party = Event {
             sound: Some(Sound::File(dir.join("hi.wav"))),
-            description: Some("hello".into()),
+            description: text("hello"),
             ..Event::default()
         };
     })
@@ -64,7 +69,7 @@ async fn without_a_sound_the_rest_runs_at_once() {
         config.events.on_alone = Event {
             delay: Duration::from_secs(60),
             move_to: Some(Destination::Home),
-            nickname: Some("Resting Bot".into()),
+            nickname: text("Resting Bot"),
             ..Event::default()
         };
     });
@@ -295,7 +300,7 @@ async fn entering_a_channel_with_people_welcomes_them() {
 async fn the_event_message_is_sent_as_written() {
     let mut h = Harness::with_config(|config| {
         config.events.on_party = Event {
-            message: Some("[b]Hi[/b] everyone".into()),
+            message: text("[b]Hi[/b] everyone"),
             ..Event::default()
         };
     });
@@ -319,7 +324,7 @@ async fn a_finished_leaving_event_lets_the_bot_welcome_people_again() {
     let mut h = Harness::with_config_in(|config, dir| {
         config.events.on_alone = Event {
             delay: Duration::from_secs(60),
-            message: Some("anyone there?".into()),
+            message: text("anyone there?"),
             ..Event::default()
         };
         config.events.on_party = Event {
@@ -348,4 +353,142 @@ async fn a_finished_leaving_event_lets_the_bot_welcome_people_again() {
         others: 1,
     });
     assert_eq!(h.sound(), Some("hi.wav"));
+}
+
+fn song_start(event: Event) -> Harness {
+    Harness::with_config(|config| {
+        config.teamspeak.nickname = "Music Bot".into();
+        config.teamspeak.description = "Drag me to your channel".into();
+        config.events.on_song_start = event;
+    })
+}
+
+#[tokio::test]
+async fn song_start_fills_in_the_song_and_its_source() {
+    let mut h = song_start(Event {
+        message: text("Now playing: {song} from {source}"),
+        description: text("{default} | {song}"),
+        ..Event::default()
+    });
+    h.add(&["a.mp3"]).await;
+    assert_eq!(
+        h.teamspeak_requests(),
+        [
+            say("Now playing: a from local file"),
+            describe("Drag me to your channel | a")
+        ]
+    );
+    h.finish_current();
+    assert!(h.teamspeak_requests().is_empty());
+}
+
+#[tokio::test]
+async fn song_start_runs_for_every_song() {
+    let mut h = song_start(Event {
+        message: text("Now playing: {song}"),
+        ..Event::default()
+    });
+    h.add(&["a.mp3", "b.mp3"]).await;
+    assert_eq!(h.outbox(), on_channel("Now playing: a"));
+    assert_eq!(h.send("!song next"), None);
+    assert_eq!(h.outbox(), on_channel("Now playing: b"));
+}
+
+#[tokio::test]
+async fn the_song_in_a_message_is_escaped() {
+    let mut h = song_start(Event {
+        message: text("[b]{song}[/b]"),
+        ..Event::default()
+    });
+    fs::write(h.dir.path().join("[url=x]y[_url].mp3"), b"audio").unwrap();
+    h.add(&["[url=x]y[_url].mp3"]).await;
+    assert_eq!(h.outbox(), on_channel("[b]\\[url=x\\]y\\[_url\\][/b]"));
+}
+
+#[tokio::test]
+async fn a_long_nickname_is_cut() {
+    let mut h = song_start(Event {
+        nickname: text("{default} | {song}"),
+        ..Event::default()
+    });
+    let name = "a very long title of a song that goes on";
+    fs::write(h.dir.path().join(format!("{name}.mp3")), b"audio").unwrap();
+    h.add(&[&format!("{name}.mp3")]).await;
+    assert_eq!(
+        h.teamspeak_requests(),
+        [TeamspeakRequest::SetNickname(
+            "Music Bot | a very long title…".into()
+        )]
+    );
+}
+
+#[tokio::test]
+async fn song_start_is_skipped_when_the_song_is_gone() {
+    let mut h = song_start(Event {
+        delay: Duration::from_secs(5),
+        message: text("Now playing: {song}"),
+        ..Event::default()
+    });
+    h.add(&["a.mp3"]).await;
+    h.send("!queue clear");
+    let later = tokio::time::Instant::now() + Duration::from_secs(6);
+    let actions = h.bot.events.tick(later);
+    assert_eq!(actions, [Action::Run(Trigger::SongStart)]);
+    h.bot.run_actions(actions);
+    assert!(h.teamspeak_requests().is_empty());
+}
+
+#[tokio::test]
+async fn an_event_sound_is_not_a_song_start() {
+    let mut h = Harness::with_config_in(|config, dir| {
+        config.events.on_party.sound = Some(Sound::File(dir.join("hi.wav")));
+        config.events.on_song_start.message = text("Now playing: {song}");
+    });
+    h.run(&[party()]);
+    assert_eq!(h.sound(), Some("hi.wav"));
+    assert!(h.teamspeak_requests().is_empty());
+}
+
+#[tokio::test]
+async fn connecting_runs_on_connect() {
+    let mut h = Harness::with_config(|config| {
+        config.teamspeak.nickname = "Music Bot".into();
+        config.events.on_connect = Event {
+            message: text("Hello!"),
+            nickname: text("{default}"),
+            ..Event::default()
+        };
+    });
+    h.connected();
+    assert_eq!(
+        h.teamspeak_requests(),
+        [
+            say("Hello!"),
+            TeamspeakRequest::SetNickname("Music Bot".into())
+        ]
+    );
+}
+
+#[tokio::test]
+async fn the_connect_sound_keeps_the_music_playing() {
+    let mut h = Harness::with_config_in(|config, dir| {
+        config.events.on_connect.sound = Some(Sound::File(dir.join("hi.wav")));
+    });
+    h.add(&["a.mp3", "b.mp3"]).await;
+    h.connected();
+    assert_eq!(h.playing(), Some("a"));
+    assert_eq!(h.sound(), None);
+}
+
+#[tokio::test]
+async fn songs_wait_for_the_connect_sound() {
+    let mut h = Harness::with_config_in(|config, dir| {
+        config.events.on_connect.sound = Some(Sound::File(dir.join("hi.wav")));
+    });
+    h.connected();
+    assert_eq!(h.sound(), Some("hi.wav"));
+    h.add(&["a.mp3"]).await;
+    assert_eq!(h.queued(), ["a"]);
+    h.finish_current();
+    assert_eq!(h.playing(), Some("a"));
 }

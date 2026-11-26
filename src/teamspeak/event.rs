@@ -13,6 +13,9 @@ pub enum TeamspeakEvent {
     },
     /// The bot moved, or someone came to or left its channel.
     Channel(CurrentChannel),
+    /// The bot connected or reconnected and knows its home channel. Comes after the first
+    /// `Channel` of the connection.
+    Connected,
 }
 
 /// Who sent a message, as the client sees them when it arrives.

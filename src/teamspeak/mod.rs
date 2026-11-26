@@ -97,6 +97,8 @@ pub struct Client {
     /// The bot's channel as last sent to the bot, so only changes go out.
     last_channel: Option<CurrentChannel>,
     description: String,
+    /// `events.on_disconnect.message`, the reason users see when the bot leaves.
+    disconnect_message: Option<String>,
     permissions: PermissionsConfig,
     /// The warning about group names that cannot work was logged.
     warned_group_names: bool,
@@ -136,6 +138,7 @@ impl Client {
             home: None,
             last_channel: None,
             description: config.teamspeak.description.clone(),
+            disconnect_message: config.events.on_disconnect.message.clone(),
             permissions: config.permissions.clone(),
             warned_group_names: false,
             sent: HashMap::new(),
@@ -199,6 +202,7 @@ impl Client {
             StreamItem::MessageEvent(InMessage::ChannelListFinished(_)) => {
                 self.on_connected();
                 self.report_channel();
+                self.report_connected();
             }
             StreamItem::IdentityLevelIncreased => self.save_identity(),
             StreamItem::MessageResult(handle, result) => self.command_done(handle, result),
@@ -379,6 +383,22 @@ impl Client {
         }
     }
 
+    /// Tells the bot that the connection is ready, for `on_connect`. Only once the home
+    /// channel is known, like `report_channel`.
+    fn report_connected(&mut self) {
+        if self.home.is_none() {
+            return;
+        }
+        match self.events.try_send(TeamspeakEvent::Connected) {
+            Ok(()) => {}
+            Err(TrySendError::Full(_)) => {
+                warn!("the bot is not keeping up, on_connect was not reported")
+            }
+            // The receiver is gone, which only happens during shutdown.
+            Err(TrySendError::Closed(_)) => {}
+        }
+    }
+
     /// Saves the identity after tsclientlib raised its level for the server.
     /// Only logged on failure, the connection works anyway, the next start computes it again.
     fn save_identity(&self) {
@@ -451,9 +471,15 @@ impl Client {
 
     /// Disconnects cleanly, so the server does not wait for a timeout.
     async fn disconnect(mut self) -> TeamspeakResult<()> {
-        // TODO: `events.on_disconnect.message` as the reason shown to users.
+        let mut options = DisconnectOptions::new();
+        if let Some(message) = &self.disconnect_message {
+            // tsclientlib sends the message only together with a reason.
+            options = options
+                .reason(Reason::Clientdisconnect)
+                .message(message.as_str());
+        }
         self.connection
-            .disconnect(DisconnectOptions::new())
+            .disconnect(options)
             .map_err(|source| TeamspeakError::Request(source.into()))?;
         // Polls until the server confirms, the disconnect is sent only while polling.
         self.connection

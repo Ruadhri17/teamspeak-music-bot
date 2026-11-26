@@ -9,7 +9,10 @@ use serde::{Deserialize, Serialize};
 use url::Url;
 
 use super::values::{Bitrate, Complexity, Volume};
-use crate::sources::{QueryType, parse_query};
+use crate::{
+    sources::{QueryType, parse_query},
+    template::Template,
+};
 
 #[derive(Deserialize, Serialize, Default, Debug, Clone, PartialEq)]
 #[serde(default, deny_unknown_fields)]
@@ -91,7 +94,8 @@ impl Default for AudioConfig {
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
 #[serde(default, deny_unknown_fields)]
 pub struct EventsConfig {
-    /// The bot connected to the server, `delay` after the channel list arrived.
+    /// The bot connected to the server, `delay` after the channel list arrived. Also after
+    /// a reconnect, the server forgets the description then.
     pub on_connect: Event,
     pub on_disconnect: DisconnectEvent,
     /// Nothing played for `delay` away from home (pause counts as idle).
@@ -100,7 +104,8 @@ pub struct EventsConfig {
     pub on_alone: Event,
     /// Someone is in the bot's channel and nothing plays, after `delay`.
     pub on_party: Event,
-    /// A new song started. Placeholders in the texts: `{title}`, `{artist}`, `{source}`.
+    /// A song from the queue started. Its texts may use `{song}` and `{source}`. It cannot
+    /// have a `sound`, the song already plays.
     pub on_song_start: Event,
 }
 
@@ -134,18 +139,19 @@ pub struct DisconnectEvent {
 /// What an event does, `delay` after its condition is met. Every action is optional, they
 /// run in this order: `message`, `sound` (to its end), then `move_to`, `description` and
 /// `nickname`. Validation rejects a zero `delay` where it would make the bot leave at once.
+/// `description` and `nickname` may use `{default}`, the value from `[teamspeak]`.
 #[derive(Deserialize, Serialize, Default, Debug, Clone, PartialEq)]
 #[serde(default, deny_unknown_fields)]
 pub struct Event {
     #[serde(with = "humantime_serde")]
     pub delay: Duration,
-    /// Channel message.
-    pub message: Option<String>,
+    /// Channel message, sent as written (BBCode included).
+    pub message: Option<Template>,
     /// Played outside the queue to its end, the remaining actions wait for it.
     pub sound: Option<Sound>,
     pub move_to: Option<Destination>,
-    pub description: Option<String>,
-    pub nickname: Option<String>,
+    pub description: Option<Template>,
+    pub nickname: Option<Template>,
 }
 
 /// The `sound` of an event: a file, or a link the bot looks up once after starting.

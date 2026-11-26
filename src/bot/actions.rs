@@ -1,15 +1,17 @@
 //! Running the actions of events: the message, the sound, and after the sound the move,
-//! description and nickname. Also the bot's own rules: clearing the queue at home.
+//! description and nickname, with their placeholders filled in. Also the bot's own rules:
+//! clearing the queue at home.
 //!
 //! The rest of an event waits for its sound in `Bot::waiting`. The player reports how the
 //! sound ended:
-//! - played to its end: the rest runs, after a welcome the waiting tracks start
+//! - played to its end: the rest runs
+//! - played to its end after a welcome or `on_connect`: the waiting tracks start
 //! - stopped by music (`!song add`, `!song resume`): the goodbye is over, the bot stays
 //! - stopped by a command with nothing to play after it (`!song next`, `!queue clear`):
 //!   the sound is skipped, the rest runs, so the bot still leaves
 //! - the bot moved, or another event's sound: the rest is dropped
 
-use std::{num::NonZeroUsize, path::Path};
+use std::{borrow::Cow, num::NonZeroUsize, path::Path};
 
 use tokio::{task::JoinError, time::Instant};
 use tracing::{debug, info, warn};
@@ -17,11 +19,16 @@ use url::Url;
 
 use super::Bot;
 use crate::{
+    chat,
     config::{Sound, YoutubeConfig},
     events::{Action, Trigger},
     sources::{Location, QueryType, TrackRef, youtube},
     teamspeak::{ReplyTo, TeamspeakRequest},
+    template::{Placeholder, Template},
 };
+
+/// TeamSpeak refuses longer nicknames. A nickname with placeholders is cut to this.
+const MAX_NICKNAME_CHARS: usize = 30;
 
 /// A finished lookup of a sound given as a link.
 pub(super) type SoundLookup = (Trigger, Result<TrackRef, String>);
@@ -86,8 +93,13 @@ impl Bot {
 
     /// The message at once, then the sound, the rest after the sound.
     fn run_event(&mut self, trigger: Trigger) {
-        // The text comes from the admin, it is sent as written, BBCode included.
-        if let Some(text) = self.events.event(trigger).message.clone() {
+        // A later song or a stop came first, there is nothing to fill `{song}` with.
+        if trigger == Trigger::SongStart && self.player.current().is_none() {
+            debug!("{} skipped, the song is no longer playing", trigger.name());
+            return;
+        }
+        if let Some(message) = &self.events.event(trigger).message {
+            let text = self.fill(trigger, message, "", true);
             self.say(ReplyTo::Channel, text);
         }
         if self.events.event(trigger).sound.is_some() && self.play_event_sound(trigger) {
@@ -106,8 +118,8 @@ impl Bot {
             );
             return false;
         };
-        // A welcome never ends a paused track, the pause is kept.
-        if trigger == Trigger::Party && !self.player.is_idle() {
+        // Only a goodbye ends a track, a welcome or `on_connect` keeps it and its pause.
+        if !trigger.is_leaving() && !self.player.is_idle() {
             debug!("{} sound skipped, a track is paused", trigger.name());
             return false;
         }
@@ -128,25 +140,54 @@ impl Bot {
     /// The actions after the sound: move, description, nickname.
     pub(super) fn run_rest(&mut self, trigger: Trigger) {
         let event = self.events.event(trigger);
+        let description = event
+            .description
+            .as_ref()
+            .map(|text| self.fill(trigger, text, &self.default_description, false));
+        let nickname = event.nickname.as_ref().map(|text| {
+            let name = self.fill(trigger, text, &self.default_nickname, false);
+            chat::shorten(&name, MAX_NICKNAME_CHARS).into_owned()
+        });
         let requests = [
             event.move_to.clone().map(TeamspeakRequest::Move),
-            event
-                .description
-                .clone()
-                .map(TeamspeakRequest::SetDescription),
-            event.nickname.clone().map(TeamspeakRequest::SetNickname),
+            description.map(TeamspeakRequest::SetDescription),
+            nickname.map(TeamspeakRequest::SetNickname),
         ];
         self.outbox.extend(requests.into_iter().flatten());
         self.events.actions_done(trigger, Instant::now());
     }
 
-    /// The sound of an event ended. The rest of the event runs, and after a welcome the
-    /// tracks that waited for it start.
+    /// A text of `trigger` with its placeholders filled in. `{default}` becomes `default`.
+    /// The song comes from outside the bot, in a chat message it is escaped.
+    fn fill(&self, trigger: Trigger, text: &Template, default: &str, chat_message: bool) -> String {
+        // Validation allows `{song}` and `{source}` only in `on_song_start`.
+        let track = (trigger == Trigger::SongStart)
+            .then(|| self.player.current())
+            .flatten()
+            .map(|current| current.track);
+        text.render(|placeholder| match placeholder {
+            Placeholder::Song => {
+                let name = track.map_or("", TrackRef::display_name);
+                if chat_message {
+                    chat::escape(name)
+                } else {
+                    Cow::Borrowed(name)
+                }
+            }
+            Placeholder::Source => {
+                Cow::Borrowed(track.map_or("", |track| track.location.source_name()))
+            }
+            Placeholder::Default => Cow::Borrowed(default),
+        })
+    }
+
+    /// The sound of an event ended. The rest of the event runs, and after a welcome or
+    /// `on_connect` the tracks that waited for it start.
     pub(super) fn sound_ended(&mut self) {
         let Some(trigger) = self.waiting.take() else {
             return;
         };
-        if trigger == Trigger::Party {
+        if !trigger.is_leaving() {
             self.player.start_queue();
         }
         self.run_rest(trigger);

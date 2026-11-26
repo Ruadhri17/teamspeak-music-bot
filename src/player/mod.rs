@@ -48,6 +48,8 @@ pub enum PlayerError {
 pub enum Notice {
     /// A track failed to open or to play. `reason` is safe to show on the chat.
     CouldNotPlay { title: String, reason: String },
+    /// A song from the queue started, `current` shows it. Not sent for the sound of an event.
+    SongStarted,
     /// The sound of an event played to its end, or failed while playing.
     SoundEnded,
     /// The sound of an event was stopped before its end: `next`, `clear`, `stop_sound`

@@ -203,6 +203,9 @@ impl Player {
             track,
             kind,
         });
+        if kind == Kind::Track {
+            self.notices.push(Notice::SongStarted);
+        }
     }
 
     /// The volume the client applies right now.

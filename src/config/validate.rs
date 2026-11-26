@@ -2,7 +2,10 @@ use std::{ops::RangeInclusive, path::Path};
 
 use humantime::format_duration;
 
-use crate::audio::MAX_BUFFER;
+use crate::{
+    audio::MAX_BUFFER,
+    template::{Placeholder, Template},
+};
 
 use super::{
     AudioConfig, ChannelRef, Config, Destination, Event, EventsConfig, Sound, TeamspeakConfig,
@@ -117,73 +120,92 @@ fn events(events: &EventsConfig) -> Result<(), ValidationError> {
         || "must be greater than 0".into(),
     )?;
 
-    event(
-        &events.on_connect,
-        [
-            "events.on_connect.message",
-            "events.on_connect.sound",
-            "events.on_connect.move_to",
-            "events.on_connect.nickname",
-        ],
-    )?;
-    event(
-        &events.on_idle,
-        [
-            "events.on_idle.message",
-            "events.on_idle.sound",
-            "events.on_idle.move_to",
-            "events.on_idle.nickname",
-        ],
-    )?;
-    event(
-        &events.on_alone,
-        [
-            "events.on_alone.message",
-            "events.on_alone.sound",
-            "events.on_alone.move_to",
-            "events.on_alone.nickname",
-        ],
-    )?;
-    event(
-        &events.on_party,
-        [
-            "events.on_party.message",
-            "events.on_party.sound",
-            "events.on_party.move_to",
-            "events.on_party.nickname",
-        ],
-    )?;
-    event(
-        &events.on_song_start,
-        [
-            "events.on_song_start.message",
-            "events.on_song_start.sound",
-            "events.on_song_start.move_to",
-            "events.on_song_start.nickname",
-        ],
-    )?;
+    event(&events.on_connect, fields!("on_connect"), false)?;
+    event(&events.on_idle, fields!("on_idle"), false)?;
+    event(&events.on_alone, fields!("on_alone"), false)?;
+    event(&events.on_party, fields!("on_party"), false)?;
+    event(&events.on_song_start, fields!("on_song_start"), true)?;
     optional_text(
         "events.on_disconnect.message",
         events.on_disconnect.message.as_deref(),
     )
 }
 
-/// The field names of `message`, `sound`, `move_to` and `nickname`, errors need them `'static`.
+/// The full names of the fields of one event, errors need them `'static`.
+struct EventFields {
+    message: &'static str,
+    sound: &'static str,
+    move_to: &'static str,
+    description: &'static str,
+    nickname: &'static str,
+}
+
+/// `EventFields` of `[events.<name>]`.
+macro_rules! fields {
+    ($name:literal) => {
+        EventFields {
+            message: concat!("events.", $name, ".message"),
+            sound: concat!("events.", $name, ".sound"),
+            move_to: concat!("events.", $name, ".move_to"),
+            description: concat!("events.", $name, ".description"),
+            nickname: concat!("events.", $name, ".nickname"),
+        }
+    };
+}
+use fields;
+
+/// `song_start` is `on_song_start`: the only event with a song for `{song}` and `{source}`,
+/// and the only one without a sound, its song already plays.
 /// An empty `description` is valid, it clears the description.
-fn event(
-    event: &Event,
-    [message, sound, move_to, nickname]: [&'static str; 4],
-) -> Result<(), ValidationError> {
-    optional_text(message, event.message.as_deref())?;
-    if let Some(Sound::File(path)) = &event.sound {
-        optional_path(sound, Some(path))?;
+fn event(event: &Event, fields: EventFields, song_start: bool) -> Result<(), ValidationError> {
+    optional_text(fields.message, event.message.as_ref().map(Template::as_str))?;
+    placeholders(fields.message, event.message.as_ref(), song_start, false)?;
+    match &event.sound {
+        Some(_) if song_start => {
+            return Err(ValidationError {
+                field: fields.sound,
+                reason: "on_song_start cannot play a sound, the song already plays".into(),
+            });
+        }
+        Some(Sound::File(path)) => optional_path(fields.sound, Some(path))?,
+        _ => {}
     }
     if let Some(Destination::Channel(ChannelRef::Name(name))) = &event.move_to {
-        not_blank(move_to, name)?;
+        not_blank(fields.move_to, name)?;
     }
+    placeholders(
+        fields.description,
+        event.description.as_ref(),
+        song_start,
+        true,
+    )?;
     if let Some(name) = &event.nickname {
-        optional_text(nickname, Some(name))?;
-        nickname_len(nickname, name)?;
+        optional_text(fields.nickname, Some(name.as_str()))?;
+        placeholders(fields.nickname, Some(name), song_start, true)?;
+        // With placeholders the length is known only when the event runs, the bot cuts it then.
+        if name.placeholders().next().is_none() {
+            nickname_len(fields.nickname, name.as_str())?;
+        }
+    }
+    Ok(())
+}
+
+/// `{song}` and `{source}` need the song of `on_song_start`, `{default}` needs a field with
+/// a value in `[teamspeak]`.
+fn placeholders(
+    field: &'static str,
+    text: Option<&Template>,
+    song: bool,
+    default: bool,
+) -> Result<(), ValidationError> {
+    for placeholder in text.into_iter().flat_map(Template::placeholders) {
+        let (allowed, only) = match placeholder {
+            Placeholder::Song | Placeholder::Source => (song, "in on_song_start"),
+            Placeholder::Default => (default, "in description and nickname"),
+        };
+        ensure(allowed, field, || {
+            format!("{{{}}} works only {only}", placeholder.name())
+        })?;
     }
     Ok(())
 }
