@@ -4,8 +4,8 @@
 # built into it, THIRD_PARTY_LICENSES.txt, and SHA256SUMS.
 # install.sh and `tsmusic setup` depend on these names.
 #
-# The binaries are built on Ubuntu 22.04, so they need glibc 2.35 at most and run on
-# Debian 12, Ubuntu 22.04 and newer. A build on a newer runner would not start there.
+# The binaries are built on Ubuntu 22.04, so they need glibc 2.35 at most, as README.md
+# and docs/install.md say. A newer runner raises that requirement.
 # No build cache here, every release is built from scratch.
 name: Release
 
