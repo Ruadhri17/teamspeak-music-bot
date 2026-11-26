@@ -16,7 +16,7 @@ check:
     cargo deny check
 
 # A C compiler and cmake build the bundled opus, ffmpeg runs in the tests. At the end
-# `tsmusic setup` offers yt-dlp and deno, answer no to the service.
+# `tsmusic setup --tools-only` installs the missing yt-dlp and deno, without the service.
 # Install the tools for working on the bot, asks for sudo
 deps:
     #!/usr/bin/env sh
@@ -35,7 +35,7 @@ deps:
     rustup component add rustfmt clippy
     cargo install --locked cargo-deny@{{deny_version}}
     cargo build
-    sudo ./target/debug/tsmusic setup
+    sudo ./target/debug/tsmusic setup --tools-only --yes
 
 # Known vulnerabilities, licenses and sources of the dependencies, see deny.toml
 deny:

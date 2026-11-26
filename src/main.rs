@@ -53,10 +53,12 @@ async fn main() -> anyhow::Result<()> {
             yes,
             update,
             dry_run,
+            tools_only,
         } => cli::setup::run(cli::setup::Options {
             yes,
             update,
             dry_run,
+            tools_only,
         }),
     }
 }

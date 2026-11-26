@@ -4,7 +4,7 @@
 //! up the service: the `tsmusic` user, `/etc/tsmusic` with templates of the config and the
 //! secrets, `/var/lib/tsmusic`, the binary in `/usr/local/bin` and the unit. Existing config
 //! and secrets are never overwritten. `--yes` takes the defaults without asking, `--dry-run`
-//! only shows the commands.
+//! only shows the commands, `--tools-only` installs the programs and skips the service.
 //!
 //! - `mod.rs`: the questions and the order of the steps
 //! - `plan`: what to install and how, the files setup writes, without I/O
@@ -38,6 +38,8 @@ pub struct Options {
     pub update: bool,
     /// Change nothing, show the commands.
     pub dry_run: bool,
+    /// Install the programs, skip the service.
+    pub tools_only: bool,
 }
 
 pub fn run(options: Options) -> anyhow::Result<()> {
@@ -77,7 +79,9 @@ fn steps(options: Options) -> anyhow::Result<()> {
     let tools = choose_tools(&installed, options)?;
     warn_missing(&installed, &tools)?;
 
-    let service = if !system::has_systemd() {
+    let service = if options.tools_only {
+        false
+    } else if !system::has_systemd() {
         log::warning("systemd is not running here, the service is skipped.")?;
         false
     } else {
@@ -106,9 +110,11 @@ fn choose_tools(
     if options.yes {
         return Ok(preselected);
     }
-    let mut prompt = multiselect("Which programs should be installed or updated?")
-        .initial_values(preselected)
-        .required(false);
+    let mut prompt = multiselect(
+        "Which programs should be installed or updated? (space selects, enter confirms)",
+    )
+    .initial_values(preselected)
+    .required(false);
     for (tool, version) in installed {
         let hint = match version {
             Some(version) => format!("{version} installed, {}", tool.purpose()),
@@ -128,7 +134,7 @@ fn warn_missing(installed: &[(Tool, Option<String>)], chosen: &[Tool]) -> io::Re
         .collect();
     if !missing.is_empty() {
         log::warning(format!(
-            "The bot does not start without {}, install it before starting the service.",
+            "The bot does not start without {}, install it before starting the bot.",
             missing.join(", ")
         ))?;
     }
@@ -156,6 +162,7 @@ fn install_tools(
     tools: &[Tool],
 ) -> anyhow::Result<()> {
     if tools.is_empty() {
+        log::info("No programs to install.")?;
         return Ok(());
     }
     let packages = plan::packages(tools, system::in_path);

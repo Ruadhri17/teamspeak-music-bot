@@ -42,6 +42,7 @@ Options of `install.sh` go to `tsmusic setup`, for example `curl ... | sh -s -- 
 | `--yes` | Takes the defaults without asking: installs what is missing and sets up the service. |
 | `--update` | Downloads yt-dlp and deno again and restarts a running service. Run it with the new release to update the bot. |
 | `--dry-run` | Changes nothing, only shows the commands setup would run. |
+| `--tools-only` | Installs the programs and skips the service, e.g. when you run the bot yourself. |
 
 `TSMUSIC_VERSION=v0.2.0` before `sh` installs a release other than the latest.
 

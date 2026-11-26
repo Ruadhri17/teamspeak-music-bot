@@ -68,6 +68,10 @@ pub enum Command {
         /// Change nothing, only show the commands.
         #[arg(long)]
         dry_run: bool,
+
+        /// Install only the programs, without the service, e.g. on a machine for development.
+        #[arg(long)]
+        tools_only: bool,
     },
 }
 
