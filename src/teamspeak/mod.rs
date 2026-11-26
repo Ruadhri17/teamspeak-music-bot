@@ -3,6 +3,7 @@
 //!
 //! - `connect`: building the connection from the config
 //! - `event`: `TeamspeakEvent` and translation from tsclientlib events
+//! - `frames`: which frame goes out next, the start buffer and the ends of streams
 //! - `home`: the home channel and the decision for `!bot summon`
 //! - `request`: `TeamspeakRequest` and executing it on the connection
 //! - `error`: `TeamspeakError` for the whole module
@@ -10,6 +11,7 @@
 mod connect;
 mod error;
 mod event;
+mod frames;
 mod home;
 mod request;
 #[cfg(test)]
@@ -19,7 +21,11 @@ pub use error::{TeamspeakError, TeamspeakResult};
 pub use event::{Author, CurrentChannel, ReplyTo, TeamspeakEvent};
 pub use request::TeamspeakRequest;
 
-use std::{collections::HashMap, path::PathBuf, time::Duration};
+use std::{
+    collections::{HashMap, VecDeque},
+    path::PathBuf,
+    time::Duration,
+};
 
 use futures::{StreamExt, future};
 use tokio::{
@@ -38,10 +44,11 @@ use tsclientlib::{
 };
 use tsproto_packets::packets::{AudioData, CodecType, OutAudio};
 
+use frames::Frames;
 use home::ChannelInfo;
 
 use crate::{
-    audio::{FRAME_DURATION, Frame, Output},
+    audio::{self, FRAME_DURATION, Frame, Output},
     config::{ChannelRef, Config, GroupRef, PermissionsConfig, Volume},
     permissions::{self, Group},
     secrets::{TeamspeakSecrets, identity},
@@ -79,15 +86,14 @@ pub struct Client {
     /// From the rest of the bot.
     requests: mpsc::Receiver<TeamspeakRequest>,
     /// PCM frames from the audio thread, one encoded and sent per tick.
-    frames: mpsc::Receiver<Frame>,
+    frames: Frames,
+    /// Streams heard to their end that the bot had no room for yet.
+    unreported: VecDeque<u64>,
     control: watch::Receiver<AudioControl>,
     /// Volume and Opus for the frame that goes out.
     output: Output,
     /// A frame went out since the last end-of-speech packet.
     talking: bool,
-    /// The oldest frame still to send, taken out of the channel while nothing is sent
-    /// (a pause, a reconnect) so the frames of stopped tracks behind it can be dropped.
-    held: Option<Frame>,
     /// Where an identity upgraded by tsclientlib is saved.
     identity_path: PathBuf,
     /// `home_channel` from the config, `None` = the server's default channel.
@@ -127,12 +133,12 @@ impl Client {
             connection: connect::connect(&config.teamspeak, secrets, identity)?,
             events,
             requests,
-            frames,
+            frames: Frames::new(frames, audio::frames_in(config.audio.start_buffer)),
+            unreported: VecDeque::new(),
             control,
             output: Output::new(config.audio.bitrate, config.audio.complexity)
                 .map_err(TeamspeakError::Encoder)?,
             talking: false,
-            held: None,
             identity_path,
             home_config: config.teamspeak.home_channel.clone(),
             home: None,
@@ -412,68 +418,43 @@ impl Client {
     /// Sends one frame, called every `FRAME_DURATION`.
     fn send_frame(&mut self) {
         let control = *self.control.borrow();
-        loop {
-            let frame = self.next_frame(control.min_stream_id);
-            // While tsclientlib reconnects, frames wait like during a pause, `send_audio`
-            // would fail for every one of them. The frame is kept, the stopped ones are
-            // already gone: their audio threads, blocked on the full channel, can see the
-            // stop and end.
-            if control.paused || self.home.is_none() {
-                self.held = frame;
-                self.end_speech();
-                return;
+        // While tsclientlib reconnects, frames wait like during a pause, `send_audio` would
+        // fail for every one of them.
+        if control.paused || self.home.is_none() {
+            self.frames.hold(control.min_stream_id);
+            self.end_speech();
+        } else {
+            match self.frames.next(control.min_stream_id, self.talking) {
+                Some(mut pcm) => match self.output.encode(&mut pcm, control.volume) {
+                    Ok(data) => {
+                        self.send_audio(&data);
+                        self.talking = true;
+                    }
+                    // One lost frame is a short gap, listeners conceal it.
+                    Err(err) => warn!("Opus could not encode a frame: {err}"),
+                },
+                None => self.end_speech(),
             }
-            match frame {
-                None => {
-                    self.end_speech();
-                    return;
+        }
+        self.report_played();
+    }
+
+    /// Tells the bot which streams were heard to their end. One the bot has no room for
+    /// waits for a later tick: a lost end would leave an event waiting for its sound.
+    fn report_played(&mut self) {
+        self.unreported.extend(self.frames.take_ended());
+        while let Some(&stream) = self.unreported.front() {
+            match self.events.try_send(TeamspeakEvent::Played(stream)) {
+                // `Closed` means the bot is gone, which only happens during shutdown.
+                Ok(()) | Err(TrySendError::Closed(_)) => {
+                    self.unreported.pop_front();
                 }
-                Some(Frame::End { stream }) => {
-                    if !self.report_played(stream) {
-                        self.held = Some(Frame::End { stream });
-                        return;
-                    }
-                    // The next playback may follow right behind, this tick still sends
-                    // its first frame, so there is no gap between tracks.
-                }
-                Some(Frame::Audio { mut pcm, .. }) => {
-                    match self.output.encode(&mut pcm, control.volume) {
-                        Ok(data) => {
-                            self.send_audio(&data);
-                            self.talking = true;
-                        }
-                        // One lost frame is a short gap, listeners conceal it.
-                        Err(err) => warn!("Opus could not encode a frame: {err}"),
-                    }
+                Err(TrySendError::Full(_)) => {
+                    debug!("the bot is not keeping up, the end of stream {stream} waits");
                     return;
                 }
             }
         }
-    }
-
-    /// Tells the bot that a playback was heard to its end. `false` when the bot is not
-    /// keeping up, the end is then held and reported on a later tick: a lost end would
-    /// leave an event waiting for its sound forever.
-    fn report_played(&mut self, stream: u64) -> bool {
-        match self.events.try_send(TeamspeakEvent::Played(stream)) {
-            Ok(()) => true,
-            Err(TrySendError::Full(_)) => {
-                debug!("the bot is not keeping up, the end of stream {stream} waits");
-                false
-            }
-            // The receiver is gone, which only happens during shutdown.
-            Err(TrySendError::Closed(_)) => true,
-        }
-    }
-
-    /// The oldest frame of a track that still plays. Frames of stopped tracks (a stream ID
-    /// below `min_stream_id`) are dropped on the way, their end too.
-    fn next_frame(&mut self, min_stream_id: u64) -> Option<Frame> {
-        self.held
-            .take()
-            .into_iter()
-            .chain(std::iter::from_fn(|| self.frames.try_recv().ok()))
-            .find(|frame| frame.stream() >= min_stream_id)
     }
 
     /// Sends the end-of-speech packet once after the last frame.

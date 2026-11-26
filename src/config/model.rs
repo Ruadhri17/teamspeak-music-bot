@@ -65,6 +65,7 @@ pub enum ChannelRef {
 pub struct AudioConfig {
     pub bitrate: Bitrate,
     pub complexity: Complexity,
+    /// Gathered before the bot starts speaking, from silence or after the buffer ran dry.
     #[serde(with = "humantime_serde")]
     pub start_buffer: Duration,
     #[serde(with = "humantime_serde")]
