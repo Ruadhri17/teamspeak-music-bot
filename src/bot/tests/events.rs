@@ -723,3 +723,28 @@ async fn a_move_home_during_the_welcome_clears_the_songs() {
     assert!(h.is_idle());
     assert!(h.queued().is_empty());
 }
+
+#[tokio::test]
+async fn a_visit_home_in_between_clears_the_queue() {
+    let mut h = Harness::new();
+    h.channel(home_channel());
+    h.channel(room_with_people(2));
+    h.add(&["a.mp3", "b.mp3"]).await;
+    h.channel(home_channel());
+    h.channel(room_with_people(2));
+    assert!(h.is_idle());
+    assert!(h.queued().is_empty());
+}
+
+#[tokio::test]
+async fn a_move_before_the_end_of_the_goodbye_drops_the_goodbye() {
+    let mut h = with_sounds();
+    h.channel(home_channel());
+    h.channel(room_with_people(2));
+    h.run(&[alone()]);
+    let goodbye = h.current_id();
+    h.teamspeak_requests();
+    h.channel(room_with_people(3));
+    h.played(goodbye);
+    assert!(!h.teamspeak_requests().contains(&GO_HOME));
+}

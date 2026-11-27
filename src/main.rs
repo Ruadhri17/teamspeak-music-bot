@@ -208,8 +208,8 @@ async fn run(location: &ConfigLocation, log_level: Option<LogLevel>) -> anyhow::
     let mut sigterm = signal(SignalKind::terminate())?;
 
     let (events_tx, events_rx) = mpsc::channel(64);
-    // The client's state as values, nothing waits and nothing is lost, see `teamspeak::state`.
-    let (state_tx, state_rx) = teamspeak::state();
+    // Unbounded: the client never waits and nothing is lost, see `ClientEvent`.
+    let (client_events_tx, client_events_rx) = mpsc::unbounded_channel();
     let (requests_tx, requests_rx) = mpsc::channel(64);
     // `audio.max_buffer` of audio waits for the client, the audio thread blocks when it is full.
     let (frames_tx, frames_rx) = mpsc::channel(audio::frames_in(config.audio.max_buffer));
@@ -218,7 +218,7 @@ async fn run(location: &ConfigLocation, log_level: Option<LogLevel>) -> anyhow::
 
     let channels = ClientChannels {
         events: events_tx,
-        state: state_tx,
+        client_events: client_events_tx,
         requests: requests_rx,
         frames: frames_rx,
         control: control_rx,
@@ -228,7 +228,7 @@ async fn run(location: &ConfigLocation, log_level: Option<LogLevel>) -> anyhow::
     let launcher = Box::new(AudioLauncher::new(&config, frames_tx));
     let bot = Bot::new(
         events_rx,
-        state_rx,
+        client_events_rx,
         requests_tx,
         control_tx,
         launcher,

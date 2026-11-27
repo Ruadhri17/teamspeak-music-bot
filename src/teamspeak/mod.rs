@@ -4,7 +4,6 @@
 //! - `connect`: building the connection from the config
 //! - `event`: `TeamspeakEvent` and translation from tsclientlib events
 //! - `frames`: which frame goes out next, the start buffer and the ends of streams
-//! - `state`: the bot's channel, connecting and the heard streams, as values for the bot
 //! - `metrics`: the audio statistics summed up every `logging.metrics_interval`
 //! - `home`: the home channel and the decision for `!bot summon`
 //! - `request`: `TeamspeakRequest` and executing it on the connection
@@ -17,12 +16,11 @@ mod frames;
 mod home;
 mod metrics;
 mod request;
-mod state;
 #[cfg(test)]
 mod tests;
 
 pub use error::{TeamspeakError, TeamspeakResult};
-pub use event::{Author, CurrentChannel, ReplyTo, TeamspeakEvent};
+pub use event::{Author, ClientEvent, CurrentChannel, ReplyTo, TeamspeakEvent};
 pub use request::TeamspeakRequest;
 
 use std::{collections::HashMap, path::PathBuf, time::Duration};
@@ -47,7 +45,6 @@ use tsproto_packets::packets::{AudioData, CodecType, OutAudio};
 use frames::Frames;
 use home::ChannelInfo;
 use metrics::AudioMetrics;
-pub use state::{StateRx, StateTx, state};
 
 use crate::{
     audio::{self, FRAME_DURATION, Frame, Output},
@@ -85,8 +82,10 @@ pub struct Client {
     connection: Connection,
     /// Chat messages to the rest of the bot.
     events: mpsc::Sender<TeamspeakEvent>,
-    /// The bot's channel, connecting and the heard streams, as values the bot reads.
-    state: StateTx,
+    /// The bot's channel, connecting and the heard streams, in order, never waiting.
+    client_events: mpsc::UnboundedSender<ClientEvent>,
+    /// The bot's channel as last sent, so only changes go out. `None` while reconnecting.
+    last_channel: Option<CurrentChannel>,
     /// From the rest of the bot.
     requests: mpsc::Receiver<TeamspeakRequest>,
     /// PCM frames from the audio thread, one encoded and sent per tick.
@@ -123,7 +122,7 @@ pub struct ClientChannels {
     /// Chat messages to the bot.
     pub events: mpsc::Sender<TeamspeakEvent>,
     /// The bot's channel, connecting and the heard streams.
-    pub state: StateTx,
+    pub client_events: mpsc::UnboundedSender<ClientEvent>,
     /// What the bot wants done on the server.
     pub requests: mpsc::Receiver<TeamspeakRequest>,
     /// PCM frames from the audio thread.
@@ -139,7 +138,7 @@ impl Client {
         secrets: &TeamspeakSecrets,
         ClientChannels {
             events,
-            state,
+            client_events,
             requests,
             frames,
             control,
@@ -151,7 +150,8 @@ impl Client {
         Ok(Self {
             connection: connect::connect(&config.teamspeak, secrets, identity)?,
             events,
-            state,
+            client_events,
+            last_channel: None,
             requests,
             frames: Frames::new(frames, audio::frames_in(config.audio.start_buffer)),
             metrics: AudioMetrics::default(),
@@ -250,7 +250,7 @@ impl Client {
                 warn!("disconnected from the server ({reason:?}), reconnecting");
                 self.home = None;
                 // After the reconnect the channel is sent again, even if it is the same.
-                self.state.channel(None);
+                self.last_channel = None;
                 // Commands of the old connection get no answer.
                 self.sent.clear();
             }
@@ -407,7 +407,10 @@ impl Client {
         let Some(current) = current_channel(state, home) else {
             return;
         };
-        self.state.channel(Some(current));
+        if self.last_channel != Some(current) {
+            self.last_channel = Some(current);
+            self.send_client_event(ClientEvent::Channel(current));
+        }
     }
 
     /// The connection is ready, for `on_connect`. Only once the home channel is known,
@@ -416,7 +419,13 @@ impl Client {
         if self.home.is_none() {
             return;
         }
-        self.state.connected();
+        self.send_client_event(ClientEvent::Connected);
+    }
+
+    /// Never waits and never fails while the bot runs. `Err` means the bot is gone, which
+    /// only happens during shutdown.
+    fn send_client_event(&self, event: ClientEvent) {
+        let _ = self.client_events.send(event);
     }
 
     /// Saves the identity after tsclientlib raised its level for the server.
@@ -461,7 +470,7 @@ impl Client {
             }
         }
         for stream in self.frames.take_ended() {
-            self.state.heard(stream);
+            self.send_client_event(ClientEvent::Heard(stream));
         }
     }
 

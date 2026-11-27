@@ -2,9 +2,24 @@ use tsclientlib::{ClientId, Invoker, MessageTarget, events::Event};
 
 use crate::permissions::Role;
 
-/// Server event in our own types, so the rest of the bot does not depend on tsclientlib.
-/// Only events: the bot's channel, connecting and the heard streams are states, see
-/// `state`.
+/// What happened to the client, in order: the bot's channel, connecting and the streams
+/// heard to their end. Sent through an unbounded channel: the client never waits for the
+/// bot (the sound would stop), nothing is lost, and the order holds, so a visit home in
+/// between still clears the queue and a move comes before the end of a goodbye heard after
+/// it. These are rare, people moving and songs ending, so the channel stays short.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClientEvent {
+    /// The bot moved, or someone came to or left its channel.
+    Channel(CurrentChannel),
+    /// The bot connected or reconnected and knows its home channel. Comes after the first
+    /// `Channel` of the connection.
+    Connected,
+    /// Every stream up to this one was heard to its end.
+    Heard(u64),
+}
+
+/// A chat message in our own types, so the rest of the bot does not depend on tsclientlib.
+/// Through a bounded channel: people write them, a flood is dropped rather than queued.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TeamspeakEvent {
     /// Chat message in the bot's channel, a private message or a poke to the bot.
