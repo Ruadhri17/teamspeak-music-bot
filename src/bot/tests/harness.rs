@@ -188,11 +188,19 @@ impl Harness {
 
     pub fn finish_current(&mut self) {
         let id = self.current_id();
-        self.bot.finished(Ended { id, failure: None });
+        self.bot.finished(Ended {
+            id,
+            failure: None,
+            end_frame: true,
+        });
     }
 
     pub fn finish_current_id(&mut self, id: PlaybackId) {
-        self.bot.finished(Ended { id, failure: None });
+        self.bot.finished(Ended {
+            id,
+            failure: None,
+            end_frame: true,
+        });
     }
 
     pub fn track_heard(&mut self) {
@@ -203,7 +211,11 @@ impl Harness {
 
     pub fn sound_heard(&mut self) {
         let id = self.current_id();
-        self.bot.finished(Ended { id, failure: None });
+        self.bot.finished(Ended {
+            id,
+            failure: None,
+            end_frame: true,
+        });
         self.played(id);
     }
 
@@ -216,6 +228,7 @@ impl Harness {
         self.bot.finished(Ended {
             id,
             failure: Some(reason.to_owned()),
+            end_frame: true,
         });
     }
 

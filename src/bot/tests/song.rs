@@ -142,6 +142,7 @@ async fn stale_finished_is_ignored() {
     h.bot.finished(Ended {
         id: old,
         failure: None,
+        end_frame: true,
     });
     assert_eq!(h.playing(), Some("b"));
     assert_eq!(h.queued(), ["c"]);
@@ -318,4 +319,58 @@ async fn next_while_paused_unpauses_for_the_next_track() {
     h.send("!song next");
     assert_eq!(h.playing(), Some("b"));
     assert!(!h.control().paused);
+}
+
+#[tokio::test]
+async fn a_failed_track_is_heard_to_its_end_before_the_next() {
+    let mut h = Harness::new();
+    h.add(&["a.mp3", "b.mp3"]).await;
+    let a = h.current_id();
+    h.fail_current("playback failed");
+    assert_eq!(h.playing(), Some("b"));
+    assert_eq!(h.send("!song current"), reply("a"));
+    assert_eq!(h.control().min_stream_id, 0);
+    h.played(a);
+    assert_eq!(h.send("!song current"), reply("b"));
+}
+
+#[tokio::test]
+async fn next_during_the_rest_of_a_failed_track_skips_only_the_rest() {
+    let mut h = Harness::new();
+    h.add(&["a.mp3", "b.mp3", "c.mp3"]).await;
+    h.fail_current("playback failed");
+    assert_eq!(h.send("!song next"), None);
+    assert_eq!(h.send("!song current"), reply("b"));
+    assert_eq!(h.queued(), ["c"]);
+}
+
+#[tokio::test]
+async fn a_track_whose_thread_panicked_is_dropped_and_the_next_starts() {
+    let mut h = Harness::new();
+    h.add(&["a.mp3", "b.mp3"]).await;
+    let a = h.current_id();
+    h.bot.finished(Ended {
+        id: a,
+        failure: Some("playback failed".to_owned()),
+        end_frame: false,
+    });
+    assert_eq!(h.playing(), Some("b"));
+    assert_eq!(h.send("!song current"), reply("b"));
+    assert!(h.control().min_stream_id > a.0);
+}
+
+#[tokio::test]
+async fn a_paused_track_whose_thread_panicked_leaves_the_queue_waiting() {
+    let mut h = Harness::new();
+    h.add(&["a.mp3", "b.mp3"]).await;
+    let a = h.current_id();
+    assert_eq!(h.send("!song pause"), None);
+    h.bot.finished(Ended {
+        id: a,
+        failure: Some("playback failed".to_owned()),
+        end_frame: false,
+    });
+    assert_eq!(h.send("!song current"), reply("nothing is playing"));
+    assert_eq!(h.queued(), ["b"]);
+    assert!(h.control().min_stream_id > a.0);
 }

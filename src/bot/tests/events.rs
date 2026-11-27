@@ -213,6 +213,7 @@ async fn a_late_end_of_a_stopped_sound_changes_nothing() {
     h.bot.finished(crate::player::Ended {
         id: old,
         failure: None,
+        end_frame: true,
     });
     assert!(h.teamspeak_requests().is_empty());
 }
@@ -310,8 +311,26 @@ async fn a_failed_sound_still_runs_the_rest() {
     h.bot.finished(crate::player::Ended {
         id,
         failure: Some("playback failed".into()),
+        end_frame: true,
+    });
+    assert!(h.teamspeak_requests().is_empty());
+    h.played(id);
+    assert_eq!(h.teamspeak_requests(), [GO_HOME]);
+}
+
+#[tokio::test]
+async fn a_sound_whose_thread_panicked_runs_the_rest_at_once() {
+    let mut h = with_sounds();
+    h.run(&[alone()]);
+    h.teamspeak_requests();
+    let id = h.current_id();
+    h.bot.finished(crate::player::Ended {
+        id,
+        failure: Some("playback failed".into()),
+        end_frame: false,
     });
     assert_eq!(h.teamspeak_requests(), [GO_HOME]);
+    assert!(h.control().min_stream_id > id.0);
 }
 
 #[tokio::test]

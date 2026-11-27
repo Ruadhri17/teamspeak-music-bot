@@ -144,6 +144,12 @@ impl Player {
                 self.notices.push(Notice::SoundInterrupted);
             }
         }
+        self.drop_buffered();
+        self.state = State::Idle;
+    }
+
+    /// Drops every buffered frame and the tails they belonged to, and unpauses the client.
+    fn drop_buffered(&mut self) {
         // IDs only go up, so `next_id` is above every stream started so far: the client
         // drops their buffered frames and plays only the streams started from now on.
         // The ends of decoded tracks go with them.
@@ -154,7 +160,6 @@ impl Player {
             control.min_stream_id = min_stream_id;
             control.paused = false;
         });
-        self.state = State::Idle;
     }
 
     /// A track finished decoding, its end is still in the buffer: it becomes a tail, heard
@@ -163,22 +168,31 @@ impl Player {
     /// track has no end to wait for.
     /// A sound that decoded to its end waits for `played`, its end is still to be heard.
     /// A failed sound ends at once, the bot decides whether the queue goes on.
-    pub fn finished(&mut self, Ended { id, failure }: Ended) {
+    pub fn finished(
+        &mut self,
+        Ended {
+            id,
+            failure,
+            end_frame,
+        }: Ended,
+    ) {
         if let State::Playing(playback) = &self.state
             && playback.kind == Kind::Sound
             && playback.id == id
         {
-            if let Some(reason) = failure {
+            if let Some(reason) = &failure {
                 warn!("the sound {} failed: {reason}", playback.track.title);
+            }
+            // What it decoded plays to its end and `played` ends it, like a whole sound.
+            if !end_frame {
+                self.drop_buffered();
                 self.state = State::Idle;
                 self.notices.push(Notice::SoundEnded);
             }
             return;
         }
-        let failed = failure.is_some();
         // Heard to its end already, there is no end left to wait for.
         let played = self.played_early.take_if(|early| *early == id).is_some();
-        let tail = !failed && !played;
         if let (Some(playback), Some(reason)) = (self.state.playback(), failure)
             && playback.id == id
         {
@@ -187,6 +201,25 @@ impl Player {
                 reason,
             });
         }
+        // Without its end in the buffer nothing would ever report the rest as heard, so it
+        // is dropped and the queue moves on at once.
+        if !end_frame {
+            if self
+                .state
+                .playback()
+                .is_some_and(|playback| playback.id == id)
+            {
+                let playing = matches!(self.state, State::Playing(_));
+                self.drop_buffered();
+                self.state = State::Idle;
+                if playing {
+                    self.play_next();
+                }
+            }
+            return;
+        }
+        // A failed track keeps its tail too: what it decoded is heard before the next one.
+        let tail = !played;
         match mem::take(&mut self.state) {
             // `stop_current` is not used, the buffered end must play before the next track.
             State::Playing(playback) if playback.id == id => {
@@ -270,12 +303,17 @@ impl Player {
             stop.clone(),
             Box::new(move |result| {
                 // A failed track ends like a finished one and the queue moves on.
+                let end_frame = !matches!(result, Err(AudioError::Panicked));
                 let failure = result.err().map(|err| {
                     warn!("playback of {title} failed: {err}");
                     chat_reason(&err)
                 });
                 // `Err` means the player has stopped, the notification is dropped.
-                let _ = done.blocking_send(Ended { id, failure });
+                let _ = done.blocking_send(Ended {
+                    id,
+                    failure,
+                    end_frame,
+                });
             }),
         );
         self.state = State::Playing(Playback {

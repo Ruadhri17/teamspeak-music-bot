@@ -108,9 +108,11 @@ impl Frame {
 }
 
 /// Plays `input` on a new thread, pushing PCM frames tagged with `stream` into `frames`
-/// until the track ends, `stop` is stopped or the receiver is gone. A track that decoded
-/// to its end gets `Frame::End` behind its last frame.
-/// Then the thread calls `on_done` with the result, also when it panics.
+/// until the track ends, `stop` is stopped or the receiver is gone. Every track that was
+/// not stopped gets `Frame::End` behind its last frame, also one that failed: what it
+/// decoded is real audio and plays to its end, and the end tells the player when.
+/// Then the thread calls `on_done` with the result, also when it panics. A panic sends no
+/// `Frame::End`, `on_done` gets `Panicked` then.
 pub fn play(
     ffmpeg_path: PathBuf,
     input: AudioInput,
@@ -122,8 +124,13 @@ pub fn play(
     std::thread::spawn(move || {
         let done = DoneGuard(Some(on_done));
         let result = decode(&ffmpeg_path, input, stream, &frames, &stop);
+        let stopped = stop.is_stopped();
+        if !stopped {
+            // Blocks behind the buffered frames like they do. `Err` means the client is gone.
+            let _ = frames.blocking_send(Frame::End { stream });
+        }
         // A stopped track fails to read once ffmpeg is killed, that is not an error.
-        done.finish(if stop.is_stopped() { Ok(()) } else { result });
+        done.finish(if stopped { Ok(()) } else { result });
     })
 }
 
@@ -155,10 +162,7 @@ fn decode(
     if stop.is_stopped() {
         return Ok(());
     }
-    decoder.finish()?;
-    // Blocks behind the buffered frames like they do. `Err` means the client is gone.
-    let _ = frames.blocking_send(Frame::End { stream });
-    Ok(())
+    decoder.finish()
 }
 
 /// Calls `on_done` exactly once. When the thread panics, `Drop` reports `Panicked`,
