@@ -3,6 +3,7 @@
 //! - `TrackRef`: a song in the queue, resolved on `!song add` and opened right before playing
 //! - TODO: common `Source` interface: resolve a link, search (track/album/playlist), open a stream
 //! - `parse_query`: link or search phrase, links checked against each source allow-list of hosts
+//! - `link_source`: the source a link belongs to, chosen by its host
 //! - `music_dir`: the folder of the local source, used for lookups and for opening tracks
 //! - `cookies`: the YouTube cookies, a private copy for each `yt-dlp` run
 
@@ -17,7 +18,7 @@ use std::path::{Path, PathBuf};
 use url::Url;
 use youtube::VideoId;
 
-use crate::config::SourcesConfig;
+use crate::config::{SourceKind, SourcesConfig};
 
 /// A song in the queue or playing. Holds no open file or stream.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -131,6 +132,14 @@ pub fn music_dir(sources: &SourcesConfig) -> Result<&Path, String> {
         .music_dir
         .as_deref()
         .ok_or_else(|| "the local source is disabled".to_string())
+}
+
+/// The source a link belongs to by its host, compared exactly. `None` for a host no
+/// source knows.
+pub fn link_source(url: &Url) -> Option<SourceKind> {
+    url.host_str()
+        .filter(|host| youtube::HOSTS.contains(host))
+        .map(|_| SourceKind::Youtube)
 }
 
 /// Hosts accepted in a link typed without `https://`.

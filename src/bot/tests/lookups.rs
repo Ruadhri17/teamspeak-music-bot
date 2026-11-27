@@ -4,8 +4,8 @@ use std::{
     time::{Duration, Instant},
 };
 
-use super::harness::Harness;
-use crate::teamspeak::ReplyTo;
+use super::harness::{Harness, on_channel};
+use crate::{config::SourceKind, teamspeak::ReplyTo};
 
 const SCRIPT: &str = r#"
 for arg; do target=$arg; done
@@ -186,4 +186,56 @@ async fn lookups_wait_for_a_free_slot() {
 #[tokio::test]
 async fn enough_slots_run_lookups_together() {
     assert!(most_at_once(4).await > 1);
+}
+
+fn local_by_default() -> Harness {
+    Harness::with_yt_dlp_and(SCRIPT, |config| config.sources.default = SourceKind::Local)
+}
+
+#[tokio::test]
+async fn a_youtube_link_plays_from_youtube_whatever_the_default() {
+    let mut h = local_by_default();
+    let outbox = h
+        .add_outbox("!song add https://www.youtube.com/watch?v=aaaaaaaaaaa")
+        .await;
+    assert!(outbox.is_empty(), "{outbox:?}");
+    assert!(h.playing().is_some());
+}
+
+#[tokio::test]
+async fn a_youtube_link_without_a_scheme_plays_from_youtube_too() {
+    let mut h = local_by_default();
+    let outbox = h.add_outbox("!song add youtu.be/aaaaaaaaaaa").await;
+    assert!(outbox.is_empty(), "{outbox:?}");
+    assert!(h.playing().is_some());
+}
+
+#[tokio::test]
+async fn a_phrase_still_goes_to_the_default_source() {
+    let mut h = local_by_default();
+    let outbox = h.add_outbox("!song add a.mp3").await;
+    assert!(outbox.is_empty(), "{outbox:?}");
+    assert_eq!(h.playing(), Some("a"));
+}
+
+#[tokio::test]
+async fn an_explicit_source_wins_over_the_link() {
+    let mut h = local_by_default();
+    let outbox = h
+        .add_outbox("!song add --source local https://www.youtube.com/watch?v=aaaaaaaaaaa")
+        .await;
+    assert_eq!(
+        outbox,
+        on_channel("the local source takes a path, not a link")
+    );
+}
+
+#[tokio::test]
+async fn a_link_from_an_unknown_service_goes_to_the_default_source() {
+    let mut h = local_by_default();
+    let outbox = h.add_outbox("!song add https://example.com/song").await;
+    assert_eq!(
+        outbox,
+        on_channel("the local source takes a path, not a link")
+    );
 }

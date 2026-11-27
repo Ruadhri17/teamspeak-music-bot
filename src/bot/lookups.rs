@@ -11,7 +11,7 @@ use crate::{
     chat,
     config::{SourceKind, SourcesConfig},
     player::Enqueued,
-    sources::{Found, QueryType, local, music_dir, youtube},
+    sources::{Found, QueryType, link_source, local, music_dir, youtube},
     teamspeak::ReplyTo,
 };
 
@@ -103,13 +103,19 @@ impl Bot {
     }
 }
 
-/// Turns a query into a track with the chosen source, or the default one from the config.
+/// Turns a query into a track. The source is the one given with `--source`, else the
+/// service of a link, else `sources.default`: the default is for search phrases, a link
+/// says where it is from.
 async fn resolve(
     sources: Arc<SourcesConfig>,
     query: QueryType,
     source: Option<SourceKind>,
 ) -> Result<Found, String> {
-    match source.unwrap_or(sources.default) {
+    let link = match &query {
+        QueryType::Link(url) => link_source(url),
+        QueryType::Phrase(_) => None,
+    };
+    match source.or(link).unwrap_or(sources.default) {
         SourceKind::Tidal | SourceKind::Spotify | SourceKind::Soundcloud => {
             Err("this source is not supported yet".to_string())
         }
