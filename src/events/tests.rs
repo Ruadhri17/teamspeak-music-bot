@@ -178,6 +178,44 @@ fn no_party_at_home() {
     assert_eq!(clock.channel(10, home(1)), []);
 }
 
+fn with_party_delay() -> (Events, Instant) {
+    let mut config = config();
+    config.on_party.delay = secs(10);
+    let start = Instant::now();
+    let mut events = Events::new(&config, start);
+    events.channel(home(0), start);
+    (events, start)
+}
+
+#[test]
+fn a_welcome_due_elsewhere_does_not_run_at_home() {
+    let (mut events, start) = with_party_delay();
+    events.channel(room(ROOM, 2), start);
+    assert_eq!(
+        events.channel(home(1), start + secs(1)),
+        [Action::Moved { home: true }]
+    );
+    assert_eq!(events.tick(start + secs(10)), []);
+    assert_eq!(events.tick(start + secs(20)), []);
+}
+
+#[test]
+fn a_welcome_due_in_the_old_channel_starts_over_in_the_new_one() {
+    let (mut events, start) = with_party_delay();
+    events.channel(room(ROOM, 2), start);
+    events.channel(room(OTHER, 1), start + secs(5));
+    assert_eq!(events.tick(start + secs(10)), []);
+    assert_eq!(events.tick(start + secs(15)), [Action::Run(Trigger::Party)]);
+}
+
+#[test]
+fn a_move_to_an_empty_channel_cancels_the_welcome() {
+    let (mut events, start) = with_party_delay();
+    events.channel(room(ROOM, 2), start);
+    events.channel(room(OTHER, 0), start + secs(1));
+    assert_eq!(events.tick(start + secs(10)), []);
+}
+
 #[test]
 fn alone_away_from_home_runs_after_the_delay() {
     let mut clock = Clock::in_room(0);
