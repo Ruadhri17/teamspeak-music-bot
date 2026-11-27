@@ -98,6 +98,11 @@ impl Bot {
             debug!("{} skipped, the song is no longer playing", trigger.name());
             return;
         }
+        // The bot is on its way out, with a sound or without: songs that waited for a
+        // welcome no longer start when it ends.
+        if trigger.is_leaving() {
+            self.queue_waits_for_welcome = false;
+        }
         if let Some(volume) = self.events.event(trigger).set_volume {
             let volume = match volume {
                 EventVolume::Default => self.default_volume,
@@ -137,6 +142,8 @@ impl Bot {
         self.waiting = None;
         match self.player.play_sound(sound) {
             Ok(()) => {
+                // Songs added from now on wait for a welcome, a goodbye leaves them alone.
+                self.queue_waits_for_welcome = !trigger.is_leaving();
                 self.report();
                 true
             }
@@ -191,7 +198,7 @@ impl Bot {
         })
     }
 
-    /// The sound of an event ended, the rest of the event runs. Tracks that waited for a
+    /// The sound of an event ended, the rest of the event runs. Songs that waited for a
     /// welcome or `on_connect` start at the end of the turn, see `Bot::start_waiting_songs`.
     pub(super) fn sound_ended(&mut self) {
         let Some(trigger) = self.waiting.take() else {
