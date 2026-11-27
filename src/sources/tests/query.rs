@@ -1,6 +1,9 @@
 use url::Url;
 
-use crate::sources::{QueryType, parse_query};
+use crate::{
+    config::SourceKind,
+    sources::{QueryType, link_source, parse_query},
+};
 
 fn link(text: &str) -> QueryType {
     QueryType::Link(Url::parse(text).unwrap())
@@ -101,4 +104,31 @@ fn id_keeps_its_case_in_a_schemeless_link() {
 #[test]
 fn empty_text_is_an_empty_phrase() {
     assert_eq!(parse_query(""), phrase(""));
+}
+
+fn source_of(text: &str) -> Option<SourceKind> {
+    link_source(&Url::parse(text).unwrap())
+}
+
+#[test]
+fn youtube_hosts_belong_to_youtube() {
+    for url in [
+        "https://www.youtube.com/watch?v=5NV6Rdv1a3I",
+        "https://youtu.be/5NV6Rdv1a3I",
+        "https://music.youtube.com/playlist?list=PLx",
+        "https://m.youtube.com/watch?v=5NV6Rdv1a3I",
+    ] {
+        assert_eq!(source_of(url), Some(SourceKind::Youtube), "{url}");
+    }
+}
+
+#[test]
+fn other_and_lookalike_hosts_belong_to_no_source() {
+    for url in [
+        "https://example.com/watch?v=5NV6Rdv1a3I",
+        "https://youtube.com.evil.example/watch?v=5NV6Rdv1a3I",
+        "https://notyoutube.com/watch?v=5NV6Rdv1a3I",
+    ] {
+        assert_eq!(source_of(url), None, "{url}");
+    }
 }
