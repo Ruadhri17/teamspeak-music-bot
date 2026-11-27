@@ -157,7 +157,6 @@ impl Player {
         self.queue.is_empty()
     }
 
-    /// Nothing plays and nothing is paused.
     /// The one rule for starting a song from the queue by itself, for `enqueue` and for
     /// the songs that waited for a welcome: nothing plays (a sound of an event playing
     /// counts), and nothing holds a pause, also one whose track is gone. A tail still heard
@@ -166,6 +165,7 @@ impl Player {
         matches!(self.state, State::Idle) && !self.control.borrow().paused
     }
 
+    /// Nothing plays, nothing is paused and no tail is left in the buffer.
     pub fn is_idle(&self) -> bool {
         matches!(self.state, State::Idle) && self.tails.is_empty()
     }

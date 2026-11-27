@@ -2,7 +2,8 @@
 //! `TeamspeakRequest`s on the connection.
 //!
 //! - `connect`: building the connection from the config
-//! - `event`: `TeamspeakEvent` and translation from tsclientlib events
+//! - `event`: `TeamspeakEvent` (chat) and `ClientEvent` (channel, connecting, heard streams),
+//!   and translation from tsclientlib events
 //! - `frames`: which frame goes out next, the start buffer and the ends of streams
 //! - `metrics`: the audio statistics summed up every `logging.metrics_interval`
 //! - `home`: the home channel and the decision for `!bot summon`

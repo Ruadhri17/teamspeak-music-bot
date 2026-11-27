@@ -240,10 +240,11 @@ impl Player {
         }
     }
 
-    /// Every stream up to `heard` was heard to its end: the client reports only the latest,
-    /// so several may have ended since the last call. Ends the sound of an event when it is
-    /// still the current one. For tracks, their tails are gone and the next track is heard,
-    /// and a current track that is heard already must not wait for its end in `finished`.
+    /// Every stream up to `heard` was heard to its end. Streams end in order, and a stopped
+    /// one never sends its end, so one report covers the streams before it too. Ends the
+    /// sound of an event when it is still the current one. For tracks, their tails are gone
+    /// and the next track is heard, and a current track that is heard already must not wait
+    /// for its end in `finished`.
     pub fn played(&mut self, heard: u64) {
         if let State::Playing(playback) = &self.state
             && playback.kind == Kind::Sound
