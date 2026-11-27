@@ -25,7 +25,7 @@ use crate::{
     events::{Events, Trigger},
     player::{Ended, Launcher, Notice, Player},
     sources::{Found, TrackRef},
-    teamspeak::{AudioControl, ReplyTo, TeamspeakEvent, TeamspeakRequest},
+    teamspeak::{AudioControl, CurrentChannel, ReplyTo, StateRx, TeamspeakEvent, TeamspeakRequest},
 };
 use actions::SoundLookup;
 use lookups::Pending;
@@ -52,8 +52,10 @@ pub struct Bot {
     pending: VecDeque<Pending>,
     /// Lets `sources.max_parallel_lookups` lookups run at once, the others wait in order.
     lookup_slots: Arc<Semaphore>,
-    /// From the client: chat messages with commands and changes in the bot's channel.
+    /// From the client: chat messages with commands.
     teamspeak_events: mpsc::Receiver<TeamspeakEvent>,
+    /// From the client: the bot's channel, connecting and the heard streams, as values.
+    teamspeak_state: StateRx,
     /// To the client: chat messages, moving the bot and the like.
     teamspeak_requests: mpsc::Sender<TeamspeakRequest>,
     /// Requests collected while one event is handled, sent in order after it.
@@ -74,6 +76,7 @@ pub struct Bot {
 impl Bot {
     pub fn new(
         teamspeak_events: mpsc::Receiver<TeamspeakEvent>,
+        teamspeak_state: StateRx,
         teamspeak_requests: mpsc::Sender<TeamspeakRequest>,
         control: watch::Sender<AudioControl>,
         launcher: Box<dyn Launcher>,
@@ -90,6 +93,7 @@ impl Bot {
             pending: VecDeque::new(),
             lookup_slots: Arc::new(Semaphore::new(config.sources.max_parallel_lookups.get())),
             teamspeak_events,
+            teamspeak_state,
             teamspeak_requests,
             outbox: Vec::new(),
             sources,
@@ -113,6 +117,19 @@ impl Bot {
                     Some(event) => self.handle_event(event),
                     None => break,
                 },
+                // `changed` marks the value as seen, `borrow` then reads it. `Err` means the
+                // client is gone, the events branch ends the loop then.
+                Ok(()) = self.teamspeak_state.channel.changed() => {
+                    let current = *self.teamspeak_state.channel.borrow();
+                    self.channel_changed(current);
+                }
+                Ok(()) = self.teamspeak_state.connects.changed() => self.connected(),
+                Ok(()) = self.teamspeak_state.heard.changed() => {
+                    let heard = *self.teamspeak_state.heard.borrow();
+                    if let Some(stream) = heard {
+                        self.heard(stream);
+                    }
+                }
                 ended = self.player.ended() => self.finished(ended),
                 Some(joined) = self.lookups.join_next_with_id() => self.lookup_done(joined),
                 Some(joined) = self.sound_lookups.join_next() => self.sound_found(joined),
@@ -155,19 +172,32 @@ impl Bot {
                     self.say(reply_to, text);
                 }
             }
-            TeamspeakEvent::Channel(current) => {
-                let actions = self.events.channel(current, Instant::now());
-                self.run_actions(actions);
-            }
-            TeamspeakEvent::Connected => {
-                let actions = self.events.connected(Instant::now());
-                self.run_actions(actions);
-            }
-            TeamspeakEvent::Played(stream) => {
-                self.player.played(stream);
-                self.report();
-            }
         }
+    }
+
+    /// The bot moved, or someone came to or left its channel. `None` while reconnecting.
+    fn channel_changed(&mut self, current: Option<CurrentChannel>) {
+        if let Some(current) = current {
+            let actions = self.events.channel(current, Instant::now());
+            self.run_actions(actions);
+        }
+    }
+
+    /// The client finished connecting. A channel that changed meanwhile goes first, the
+    /// client learned it first: `on_connect` acts in the channel the bot is in.
+    fn connected(&mut self) {
+        if self.teamspeak_state.channel.has_changed().unwrap_or(false) {
+            let current = *self.teamspeak_state.channel.borrow_and_update();
+            self.channel_changed(current);
+        }
+        let actions = self.events.connected(Instant::now());
+        self.run_actions(actions);
+    }
+
+    /// Every stream up to `stream` was heard to its end.
+    fn heard(&mut self, stream: u64) {
+        self.player.played(stream);
+        self.report();
     }
 
     /// A track ended, the player moves on.

@@ -374,3 +374,28 @@ async fn a_paused_track_whose_thread_panicked_leaves_the_queue_waiting() {
     assert_eq!(h.queued(), ["b"]);
     assert!(h.control().min_stream_id > a.0);
 }
+
+#[tokio::test]
+async fn two_streams_heard_at_once_leave_nothing_waiting() {
+    let mut h = Harness::new();
+    h.add(&["a.mp3", "b.mp3"]).await;
+    h.finish_current();
+    let b = h.current_id();
+    h.played(b);
+    assert_eq!(h.send("!song current"), reply("b"));
+    h.finish_current_id(b);
+    assert!(h.is_idle());
+    assert_eq!(h.send("!song current"), reply("nothing is playing"));
+}
+
+#[tokio::test]
+async fn a_tail_and_the_next_heard_at_once_move_on_to_the_third() {
+    let mut h = Harness::new();
+    h.add(&["a.mp3", "b.mp3", "c.mp3"]).await;
+    h.finish_current();
+    let b = h.current_id();
+    h.played(b);
+    h.finish_current_id(b);
+    assert_eq!(h.playing(), Some("c"));
+    assert_eq!(h.send("!song current"), reply("c"));
+}
