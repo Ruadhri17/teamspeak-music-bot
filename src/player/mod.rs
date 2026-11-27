@@ -158,10 +158,12 @@ impl Player {
     }
 
     /// Nothing plays and nothing is paused.
-    /// Paused by `!song pause`, also when the paused track is gone: the queue waits for
-    /// `!song resume`.
-    pub fn is_held(&self) -> bool {
-        self.control.borrow().paused
+    /// The one rule for starting a song from the queue by itself, for `enqueue` and for
+    /// the songs that waited for a welcome: nothing plays (a sound of an event playing
+    /// counts), and nothing holds a pause, also one whose track is gone. A tail still heard
+    /// does not stop it, the next song decodes behind it.
+    pub fn can_start(&self) -> bool {
+        matches!(self.state, State::Idle) && !self.control.borrow().paused
     }
 
     pub fn is_idle(&self) -> bool {
@@ -206,12 +208,6 @@ impl Player {
             }
             _ => None,
         }
-    }
-
-    /// Only the end of a decoded track is left and the client holds it: `pause` while
-    /// nothing decodes any more.
-    fn tail_paused(&self) -> bool {
-        matches!(self.state, State::Idle) && !self.tails.is_empty() && self.control.borrow().paused
     }
 
     /// A track is heard now: the oldest tail, or the playing track when no tail is left.
