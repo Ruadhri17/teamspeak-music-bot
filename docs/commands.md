@@ -124,7 +124,7 @@ After adding:
 - Searching and adding happen in the background, so you can keep using commands in the meantime. Songs keep the order of your commands, even when a later search finishes first.
 - If the queue fills up in the middle of a playlist, the bot adds what fits and tells you how many songs that was.
 - If a track is unavailable, the bot says so and moves on to the next one.
-- The queue has no length limit by default (the bot administrator may set one).
+- The queue has no length limit by default (the bot administrator may set one). When the queue is full, `!song add` is refused right away.
 
 ### `!song stop` / `!song pause`
 
