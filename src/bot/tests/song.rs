@@ -373,6 +373,10 @@ async fn a_paused_track_whose_thread_panicked_leaves_the_queue_waiting() {
     assert_eq!(h.send("!song current"), reply("nothing is playing"));
     assert_eq!(h.queued(), ["b"]);
     assert!(h.control().min_stream_id > a.0);
+    assert!(h.control().paused);
+    assert_eq!(h.send("!song resume"), None);
+    assert_eq!(h.playing(), Some("b"));
+    assert!(!h.control().paused);
 }
 
 #[tokio::test]

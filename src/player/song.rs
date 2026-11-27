@@ -214,6 +214,9 @@ impl Player {
                 self.state = State::Idle;
                 if playing {
                     self.play_next();
+                } else {
+                    // A pause stays a pause: the queue waits for `resume`.
+                    self.control.send_modify(|control| control.paused = true);
                 }
             }
             return;

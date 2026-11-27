@@ -158,6 +158,12 @@ impl Player {
     }
 
     /// Nothing plays and nothing is paused.
+    /// Paused by `!song pause`, also when the paused track is gone: the queue waits for
+    /// `!song resume`.
+    pub fn is_held(&self) -> bool {
+        self.control.borrow().paused
+    }
+
     pub fn is_idle(&self) -> bool {
         matches!(self.state, State::Idle) && self.tails.is_empty()
     }
