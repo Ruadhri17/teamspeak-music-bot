@@ -150,11 +150,7 @@ impl Bot {
     /// songs. A new welcome in the same turn plays first, the songs wait for it. Only
     /// ending a goodbye starts songs elsewhere, see `end_goodbye`.
     fn start_waiting_songs(&mut self) {
-        if self.waiting.is_none()
-            && self.player.is_idle()
-            && !self.player.is_held()
-            && !self.player.queue_is_empty()
-        {
+        if self.waiting.is_none() && self.player.can_start() && !self.player.queue_is_empty() {
             self.player.start_queue();
             self.report();
         }

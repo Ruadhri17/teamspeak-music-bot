@@ -403,3 +403,21 @@ async fn a_tail_and_the_next_heard_at_once_move_on_to_the_third() {
     assert_eq!(h.playing(), Some("c"));
     assert_eq!(h.send("!song current"), reply("c"));
 }
+
+#[tokio::test]
+async fn a_song_added_after_a_panicked_paused_track_waits_for_resume() {
+    let mut h = Harness::new();
+    h.add(&["a.mp3"]).await;
+    let a = h.current_id();
+    assert_eq!(h.send("!song pause"), None);
+    h.bot.finished(Ended {
+        id: a,
+        failure: Some("playback failed".to_owned()),
+        end_frame: false,
+    });
+    h.add(&["b.mp3"]).await;
+    assert_eq!(h.playing(), None);
+    assert_eq!(h.queued(), ["b"]);
+    assert_eq!(h.send("!song resume"), None);
+    assert_eq!(h.playing(), Some("b"));
+}

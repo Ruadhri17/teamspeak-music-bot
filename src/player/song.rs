@@ -33,9 +33,8 @@ impl Player {
             }
             added += 1;
             // Started one by one, so the first track leaves the queue before the next ones
-            // are counted against its limit. A paused end of a track keeps its pause, the
-            // new track waits for `resume`.
-            if matches!(self.state, State::Idle) && !self.tail_paused() {
+            // are counted against its limit. A pause holds, the new track waits for `resume`.
+            if self.can_start() {
                 self.play_next();
             }
         }
