@@ -1,5 +1,5 @@
-//! Running the actions of events: the message, the sound, and after the sound the move,
-//! description and nickname, with their placeholders filled in. Also the bot's own rules:
+//! Running the actions of events: the volume, the message, the sound, and after the sound
+//! the move, description and nickname, with their placeholders filled in. Also the bot's own rules:
 //! clearing the queue at home.
 //!
 //! The rest of an event waits for its sound in `Bot::waiting`. The player reports how the
@@ -20,7 +20,7 @@ use url::Url;
 use super::Bot;
 use crate::{
     chat,
-    config::{Sound, YoutubeConfig},
+    config::{EventVolume, Sound, YoutubeConfig},
     events::{Action, Trigger},
     sources::{Location, QueryType, TrackRef, youtube},
     teamspeak::{ReplyTo, TeamspeakRequest},
@@ -91,12 +91,22 @@ impl Bot {
         }
     }
 
-    /// The message at once, then the sound, the rest after the sound.
+    /// The volume and the message at once, then the sound, the rest after the sound.
     fn run_event(&mut self, trigger: Trigger) {
         // A later song or a stop came first, there is nothing to fill `{song}` with.
         if trigger == Trigger::SongStart && self.player.current().is_none() {
             debug!("{} skipped, the song is no longer playing", trigger.name());
             return;
+        }
+        if let Some(volume) = self.events.event(trigger).set_volume {
+            let volume = match volume {
+                EventVolume::Default => self.default_volume,
+                EventVolume::Set(volume) => volume,
+            };
+            // Validation keeps it within `audio.max_volume`, the only reason to refuse it.
+            if let Err(err) = self.player.set_volume(volume) {
+                warn!("the {} volume was not set: {err}", trigger.name());
+            }
         }
         if let Some(message) = &self.events.event(trigger).message {
             let text = self.fill(trigger, message, "", true);

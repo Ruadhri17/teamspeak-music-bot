@@ -2,7 +2,7 @@ use std::{fs, time::Duration};
 
 use super::harness::{Harness, on_channel};
 use crate::{
-    config::{Destination, Event, Sound},
+    config::{Destination, Event, EventVolume, Sound, Volume},
     events::{Action, Trigger},
     teamspeak::{CurrentChannel, ReplyTo, TeamspeakRequest},
     template::Template,
@@ -541,4 +541,86 @@ async fn songs_wait_for_the_connect_sound() {
     assert_eq!(h.queued(), ["a"]);
     h.sound_heard();
     assert_eq!(h.playing(), Some("a"));
+}
+
+fn percent(volume: u8) -> Volume {
+    Volume::new(volume).unwrap()
+}
+
+fn with_volumes() -> Harness {
+    Harness::with_config_in(|config, dir| {
+        config.audio.default_volume = percent(40);
+        config.events.on_alone = Event {
+            delay: Duration::from_secs(60),
+            set_volume: Some(EventVolume::Default),
+            sound: Some(Sound::File(dir.join("bye.wav"))),
+            move_to: Some(Destination::Home),
+            ..Event::default()
+        };
+        config.events.on_party = Event {
+            set_volume: Some(EventVolume::Set(percent(80))),
+            sound: Some(Sound::File(dir.join("hi.wav"))),
+            ..Event::default()
+        };
+        config.events.on_connect = Event {
+            set_volume: Some(EventVolume::Set(percent(10))),
+            ..Event::default()
+        };
+    })
+}
+
+#[tokio::test]
+async fn the_event_sound_plays_with_its_volume() {
+    let mut h = with_volumes();
+    h.run(&[party()]);
+    assert_eq!(h.sound(), Some("hi.wav"));
+    assert_eq!(h.control().volume, percent(80));
+}
+
+#[tokio::test]
+async fn the_volume_stays_after_the_sound() {
+    let mut h = with_volumes();
+    h.run(&[party()]);
+    h.sound_heard();
+    h.add(&["a.mp3"]).await;
+    assert_eq!(h.playing(), Some("a"));
+    assert_eq!(h.control().volume, percent(80));
+}
+
+#[tokio::test]
+async fn the_default_brings_back_the_configured_volume() {
+    let mut h = with_volumes();
+    assert_eq!(h.send("!bot volume 90"), None);
+    h.run(&[alone()]);
+    assert_eq!(h.control().volume, percent(40));
+    assert_eq!(h.send("!bot volume"), Some("volume: 40".to_owned()));
+}
+
+#[tokio::test]
+async fn an_event_without_a_sound_sets_the_volume_at_once() {
+    let mut h = with_volumes();
+    h.run(&[Action::Run(Trigger::Connect)]);
+    assert_eq!(h.control().volume, percent(10));
+}
+
+#[tokio::test]
+async fn a_goodbye_ended_by_music_has_set_the_volume_already() {
+    let mut h = with_volumes();
+    assert_eq!(h.send("!bot volume 90"), None);
+    h.run(&[alone()]);
+    h.teamspeak_requests();
+    h.add(&["a.mp3"]).await;
+    assert_eq!(h.playing(), Some("a"));
+    assert!(h.teamspeak_requests().is_empty());
+    assert_eq!(h.control().volume, percent(40));
+}
+
+#[tokio::test]
+async fn without_set_volume_events_leave_the_volume_alone() {
+    let mut h = with_sounds();
+    assert_eq!(h.send("!bot volume 90"), None);
+    h.run(&[party()]);
+    h.run(&[alone()]);
+    h.sound_heard();
+    assert_eq!(h.control().volume, percent(90));
 }

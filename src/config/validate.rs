@@ -8,7 +8,8 @@ use crate::{
 };
 
 use super::{
-    AudioConfig, ChannelRef, Config, Destination, Event, EventsConfig, Sound, TeamspeakConfig,
+    AudioConfig, ChannelRef, Config, Destination, Event, EventVolume, EventsConfig, Sound,
+    TeamspeakConfig, Volume,
 };
 
 /// TeamSpeak refuses nicknames outside this length (in characters).
@@ -28,7 +29,7 @@ pub struct ValidationError {
 pub fn validate(config: &Config) -> Result<(), ValidationError> {
     teamspeak(&config.teamspeak)?;
     audio(&config.audio)?;
-    events(&config.events)?;
+    events(&config.events, config.audio.max_volume)?;
 
     not_empty_path("paths.state_dir", &config.paths.state_dir)?;
     not_empty_path("paths.secrets_file", &config.paths.secrets_file)?;
@@ -111,7 +112,7 @@ fn audio(audio: &AudioConfig) -> Result<(), ValidationError> {
     )
 }
 
-fn events(events: &EventsConfig) -> Result<(), ValidationError> {
+fn events(events: &EventsConfig, max_volume: Volume) -> Result<(), ValidationError> {
     // A zero delay would make the bot leave as soon as playback stops or the channel empties.
     ensure(
         !events.on_idle.delay.is_zero(),
@@ -124,11 +125,16 @@ fn events(events: &EventsConfig) -> Result<(), ValidationError> {
         || "must be greater than 0".into(),
     )?;
 
-    event(&events.on_connect, fields!("on_connect"), false)?;
-    event(&events.on_idle, fields!("on_idle"), false)?;
-    event(&events.on_alone, fields!("on_alone"), false)?;
-    event(&events.on_party, fields!("on_party"), false)?;
-    event(&events.on_song_start, fields!("on_song_start"), true)?;
+    event(&events.on_connect, fields!("on_connect"), max_volume, false)?;
+    event(&events.on_idle, fields!("on_idle"), max_volume, false)?;
+    event(&events.on_alone, fields!("on_alone"), max_volume, false)?;
+    event(&events.on_party, fields!("on_party"), max_volume, false)?;
+    event(
+        &events.on_song_start,
+        fields!("on_song_start"),
+        max_volume,
+        true,
+    )?;
     optional_text(
         "events.on_disconnect.message",
         events.on_disconnect.message.as_deref(),
@@ -137,6 +143,7 @@ fn events(events: &EventsConfig) -> Result<(), ValidationError> {
 
 /// The full names of the fields of one event, errors need them `'static`.
 struct EventFields {
+    set_volume: &'static str,
     message: &'static str,
     sound: &'static str,
     move_to: &'static str,
@@ -148,6 +155,7 @@ struct EventFields {
 macro_rules! fields {
     ($name:literal) => {
         EventFields {
+            set_volume: concat!("events.", $name, ".set_volume"),
             message: concat!("events.", $name, ".message"),
             sound: concat!("events.", $name, ".sound"),
             move_to: concat!("events.", $name, ".move_to"),
@@ -160,8 +168,23 @@ use fields;
 
 /// `song_start` is `on_song_start`: the only event with a song for `{song}` and `{source}`,
 /// and the only one without a sound, its song already plays.
-/// An empty `description` is valid, it clears the description.
-fn event(event: &Event, fields: EventFields, song_start: bool) -> Result<(), ValidationError> {
+/// An empty `description` is valid, it clears the description. `set_volume` has the limit
+/// of `!bot volume`.
+fn event(
+    event: &Event,
+    fields: EventFields,
+    max_volume: Volume,
+    song_start: bool,
+) -> Result<(), ValidationError> {
+    if let Some(EventVolume::Set(volume)) = event.set_volume {
+        ensure(volume <= max_volume, fields.set_volume, || {
+            format!(
+                "must not be greater than audio.max_volume ({} > {})",
+                volume.get(),
+                max_volume.get()
+            )
+        })?;
+    }
     optional_text(fields.message, event.message.as_ref().map(Template::as_str))?;
     placeholders(fields.message, event.message.as_ref(), song_start, false)?;
     match &event.sound {

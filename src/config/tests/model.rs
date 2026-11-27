@@ -268,3 +268,52 @@ fn unknown_placeholder_is_a_config_error() {
         "{err}"
     );
 }
+
+fn event_volume(value: &str) -> Result<Option<EventVolume>, toml::de::Error> {
+    parse(&format!("[events.on_party]\nset_volume = {value}\n"))
+        .map(|config| config.events.on_party.set_volume)
+}
+
+#[test]
+fn set_volume_takes_a_number_or_the_default() {
+    assert_eq!(
+        event_volume("30").unwrap(),
+        Some(EventVolume::Set(Volume::new(30).unwrap()))
+    );
+    assert_eq!(
+        event_volume("0").unwrap(),
+        Some(EventVolume::Set(Volume::new(0).unwrap()))
+    );
+    assert_eq!(
+        event_volume(r#""{default}""#).unwrap(),
+        Some(EventVolume::Default)
+    );
+    assert_eq!(parse("").unwrap().events.on_party.set_volume, None);
+}
+
+#[test]
+fn set_volume_rejects_other_values() {
+    for value in [
+        "101",
+        "300",
+        "-1",
+        r#""loud""#,
+        r#""50""#,
+        r#""{song}""#,
+        "50.5",
+    ] {
+        let err = event_volume(value).unwrap_err().to_string();
+        assert!(err.contains("set_volume"), "{value}: {err}");
+    }
+    let err = event_volume("101").unwrap_err().to_string();
+    assert!(err.contains(r#"must be 0-100 or "{default}""#), "{err}");
+}
+
+#[test]
+fn set_volume_survives_toml_round_trip() {
+    let mut config = Config::default();
+    config.events.on_idle.set_volume = Some(EventVolume::Default);
+    config.events.on_party.set_volume = Some(EventVolume::Set(Volume::new(80).unwrap()));
+    let written = toml::to_string(&config).unwrap();
+    assert_eq!(parse(&written).unwrap(), config);
+}

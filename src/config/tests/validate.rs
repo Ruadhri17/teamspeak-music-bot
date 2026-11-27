@@ -1,7 +1,7 @@
 use std::{path::PathBuf, time::Duration};
 
 use crate::{
-    config::{ChannelRef, Config, Destination, Sound, Volume, validate::validate},
+    config::{ChannelRef, Config, Destination, EventVolume, Sound, Volume, validate::validate},
     template::Template,
 };
 
@@ -346,5 +346,25 @@ fn song_start_cannot_play_a_sound() {
     assert_eq!(
         validate(&config).unwrap_err().to_string(),
         "events.on_song_start.sound: on_song_start cannot play a sound, the song already plays"
+    );
+}
+
+#[test]
+fn set_volume_may_reach_max_volume() {
+    let mut config = with_volumes(50, 80);
+    config.events.on_party.set_volume = Some(EventVolume::Set(Volume::new(80).unwrap()));
+    config.events.on_idle.set_volume = Some(EventVolume::Default);
+    assert!(validate(&config).is_ok());
+}
+
+#[test]
+fn set_volume_above_max_volume_is_rejected() {
+    let mut config = with_volumes(50, 80);
+    config.events.on_song_start.set_volume = Some(EventVolume::Set(Volume::new(90).unwrap()));
+    let err = validate(&config).unwrap_err();
+    assert_eq!(err.field, "events.on_song_start.set_volume");
+    assert_eq!(
+        err.to_string(),
+        "events.on_song_start.set_volume: must not be greater than audio.max_volume (90 > 80)"
     );
 }

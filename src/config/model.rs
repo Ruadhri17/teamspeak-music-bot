@@ -138,14 +138,17 @@ pub struct DisconnectEvent {
 }
 
 /// What an event does, `delay` after its condition is met. Every action is optional, they
-/// run in this order: `message`, `sound` (to its end), then `move_to`, `description` and
-/// `nickname`. Validation rejects a zero `delay` where it would make the bot leave at once.
+/// run in this order: `set_volume`, `message`, `sound` (to its end), then `move_to`,
+/// `description` and `nickname`. A fixed order, not the order in the file: TOML gives keys
+/// no order. Validation rejects a zero `delay` where it would make the bot leave at once.
 /// `description` and `nickname` may use `{default}`, the value from `[teamspeak]`.
 #[derive(Deserialize, Serialize, Default, Debug, Clone, PartialEq)]
 #[serde(default, deny_unknown_fields)]
 pub struct Event {
     #[serde(with = "humantime_serde")]
     pub delay: Duration,
+    /// Like `!bot volume`, first, so the sound of the event plays with it already.
+    pub set_volume: Option<EventVolume>,
     /// Channel message, sent as written (BBCode included).
     pub message: Option<Template>,
     /// Played outside the queue to its end, the remaining actions wait for it.
@@ -180,6 +183,51 @@ impl From<Sound> for String {
         match sound {
             Sound::File(path) => path.to_string_lossy().into_owned(),
             Sound::Link(url) => url.into(),
+        }
+    }
+}
+
+/// The `set_volume` of an event: `set_volume = 30`, or `set_volume = "{default}"` for
+/// `audio.default_volume`.
+#[derive(Deserialize, Serialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[serde(try_from = "VolumeValue", into = "VolumeValue")]
+pub enum EventVolume {
+    Default,
+    Set(Volume),
+}
+
+/// `EventVolume` as written. Any integer, so a value over 255 gets the same error as 101.
+#[derive(Deserialize, Serialize)]
+#[serde(untagged)]
+enum VolumeValue {
+    Percent(i64),
+    Text(String),
+}
+
+const DEFAULT_VOLUME: &str = "{default}";
+
+impl TryFrom<VolumeValue> for EventVolume {
+    type Error = String;
+
+    fn try_from(value: VolumeValue) -> Result<Self, Self::Error> {
+        let invalid = || format!("must be 0-{} or \"{DEFAULT_VOLUME}\"", Volume::MAX);
+        match value {
+            VolumeValue::Text(text) if text == DEFAULT_VOLUME => Ok(Self::Default),
+            VolumeValue::Text(_) => Err(invalid()),
+            VolumeValue::Percent(percent) => u8::try_from(percent)
+                .ok()
+                .and_then(Volume::new)
+                .map(Self::Set)
+                .ok_or_else(invalid),
+        }
+    }
+}
+
+impl From<EventVolume> for VolumeValue {
+    fn from(volume: EventVolume) -> Self {
+        match volume {
+            EventVolume::Default => Self::Text(DEFAULT_VOLUME.to_owned()),
+            EventVolume::Set(volume) => Self::Percent(volume.get().into()),
         }
     }
 }

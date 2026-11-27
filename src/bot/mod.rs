@@ -21,7 +21,7 @@ use std::{
 
 use crate::{
     chat,
-    config::{Config, SourcesConfig},
+    config::{Config, SourcesConfig, Volume},
     events::{Events, Trigger},
     player::{Ended, Launcher, Notice, Player},
     sources::{Found, TrackRef},
@@ -67,6 +67,8 @@ pub struct Bot {
     /// `teamspeak.nickname` and `teamspeak.description`, for `{default}` in events.
     default_nickname: String,
     default_description: String,
+    /// `set_volume = "{default}"` of events.
+    default_volume: Volume,
 }
 
 impl Bot {
@@ -94,6 +96,7 @@ impl Bot {
             page_size: config.queue.show_page_size,
             default_nickname: config.teamspeak.nickname.clone(),
             default_description: config.teamspeak.description.clone(),
+            default_volume: config.audio.default_volume,
         };
         bot.prepare_sounds();
         bot

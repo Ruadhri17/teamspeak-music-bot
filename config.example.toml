@@ -31,6 +31,8 @@ pause_release_after = "5m"          # [live] release the stream after being paus
 # Events. Each one except on_disconnect may do any of these, every action is optional
 # and an event without actions does nothing:
 #   delay        wait this long after the condition is met, default "0s"
+#   set_volume   0-100 (at most audio.max_volume) or "{default}" for audio.default_volume,
+#                like !bot volume, so the sound below plays with it already
 #   message      channel message
 #   sound        a file, or a YouTube link (looked up once after the start, and each
 #                time it plays it starts a few seconds later than a file),
@@ -38,7 +40,8 @@ pause_release_after = "5m"          # [live] release the stream after being paus
 #   move_to      "home", or { channel = 22 } / { channel = "Parent/Channel" }
 #   description  "" clears it
 #   nickname     3-30 characters
-# They run in this order, the rest waits for the end of the sound.
+# They run in this order, whatever the order in the file. The rest waits for the end of
+# the sound.
 # A written event section has only the actions it lists.
 # Description and nickname stay as an event set them, another event may set them back.
 # Placeholders in the texts:
@@ -58,16 +61,19 @@ pause_release_after = "5m"          # [live] release the stream after being paus
 
 [events.on_idle]                    # nothing played for `delay` away from home (pause counts as idle)
 delay = "10m"                       # [live] must be more than 0
+# set_volume = "{default}"          # [live] the next people start from the default volume
 # message = "Nothing is playing, going back home"      # [live]
 # sound = "/home/tsmusic/channel-music/goodbye.wav"   # [live]
 move_to = "home"                    # [live]
 
 [events.on_alone]                   # bot alone in its channel for `delay`, away from home
 delay = "1m"                        # [live] must be more than 0
+# set_volume = "{default}"          # [live]
 # sound = "/home/tsmusic/channel-music/goodbye.wav"   # [live]
 move_to = "home"                    # [live]
 
 [events.on_party]                   # someone is in the bot's channel and nothing plays (not at home)
+# set_volume = 70                   # [live] the welcome and the music after it
 # sound = "/home/tsmusic/channel-music/welcome.wav"   # [live] played before the queue
 # description = "Playing music, drag me to your channel when I am home"   # [live]
 
