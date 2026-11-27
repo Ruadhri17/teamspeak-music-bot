@@ -9,6 +9,7 @@ An open source music bot for TeamSpeak, written in Rust. It joins a channel as a
 
 - [Installing the bot](docs/install.md): the install script, `tsmusic setup`, the systemd service
 - [Controlling the bot](docs/commands.md): every chat command, for the people on your server
+- [YouTube cookies](docs/youtube.md): when YouTube blocks the server, and for age-restricted videos
 - [config.example.toml](config.example.toml): every setting, with its default and what it does
 - [Releasing a version](docs/release.md): for maintainers
 
@@ -16,7 +17,7 @@ An open source music bot for TeamSpeak, written in Rust. It joins a channel as a
 
 What the bot does today:
 
-- **YouTube:** links to videos, Shorts, live streams and YouTube Music, playlists (up to 500 songs by default) and search phrases (`!song add daft punk get lucky`).
+- **YouTube:** links to videos, Shorts, live streams and YouTube Music, playlists (up to 500 songs by default) and search phrases (`!song add daft punk get lucky`). With the cookies of a YouTube account it also plays age-restricted videos and works on servers that YouTube asks to sign in.
 - **Local files:** audio files from a music directory on the bot's server.
 - **Queue:** pause, resume, skip, the current song, a paged `!queue show`, removing songs, clearing everything. Searches run in the background and keep the order of the commands.
 - **Volume:** a logarithmic scale like most volume controls, heard at once also in the middle of a song, with an optional highest allowed value.
@@ -33,7 +34,6 @@ Planned:
 - More sources: SoundCloud, then Spotify. Tidal once official API access is available.
 - Searching for albums and public playlists (`--album`, `--playlist`).
 - Settings from the chat (`!bot config list | get | set | reload`) and reloading without a restart.
-- YouTube cookies, for age-restricted videos and for servers that YouTube asks to sign in.
 - Secrets encrypted with systemd credentials.
 
 ## Quick install

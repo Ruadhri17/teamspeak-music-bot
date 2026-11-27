@@ -60,5 +60,6 @@ Download `tsmusic-<architecture>-unknown-linux-gnu` and `SHA256SUMS` from the re
 
 ## Notes
 
+- If `tsmusic yt-check` fails with `Sign in to confirm you're not a bot`, YouTube blocks the server. Give the bot the cookies of a YouTube account, see [YouTube cookies](youtube.md).
 - The service may write only to `/var/lib/tsmusic`. It cannot read home directories, so keep `sources.local.music_dir` elsewhere, e.g. in `/srv/music`.
 - Running setup again is safe. It installs what you select and rewrites the unit, but keeps the config and the secrets. Change the unit with `sudo systemctl edit tsmusic`, setup overwrites the file itself.
