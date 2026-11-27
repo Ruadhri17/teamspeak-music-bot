@@ -27,7 +27,7 @@ What the bot does today:
 - **Events:** on connect, disconnect, idle, alone, party (people in the channel) and song start the bot can send a message, play a sound, move, and change its description or nickname, e.g. `Now playing: {song}`.
 - **A quiet chat:** the bot answers errors and questions, not every command. It points out typos (`did you mean !song?`) and ignores commands meant for other bots.
 - **Checked configuration:** a misspelled key or a wrong value stops the start with the line of the mistake. Passwords live in a separate file that the bot refuses to read when others can read it.
-- **Installer:** `tsmusic setup` installs ffmpeg, yt-dlp and deno and sets the bot up as a hardened systemd service.
+- **Installer:** `tsmusic setup` installs ffmpeg, yt-dlp and deno and sets the bot up as a hardened systemd service. `tsmusic update` moves it to a new release after checking the config with the new version.
 
 Planned:
 

@@ -48,11 +48,28 @@ Options of `install.sh` go to `tsmusic setup`, for example `curl ... | sh -s -- 
 | Option | What it does |
 | --- | --- |
 | `--yes` | Takes the defaults without asking: installs what is missing and sets up the service. |
-| `--update` | Downloads yt-dlp and deno again and restarts a running service. Run it with the new release to update the bot. |
+| `--update` | Downloads yt-dlp and deno again and restarts a running service. With the script it also installs the latest bot, see [Updating](#updating). |
 | `--dry-run` | Changes nothing, only shows the commands setup would run. |
 | `--tools-only` | Installs the programs and skips the service, e.g. when you run the bot yourself. |
 
 `TSMUSIC_VERSION=v0.2.0` before `sh` installs a release other than the latest.
+
+## Updating
+
+```sh
+sudo tsmusic update
+```
+
+It finds the latest release and does nothing when the bot is up to date. Otherwise it downloads the bot for this machine, checks its SHA-256 sum and lets the new version check `/etc/tsmusic/config.toml`. If a setting was renamed or removed, the update stops with the line to fix and the running bot is left as it is. Then the new version runs its own setup: it installs itself, downloads yt-dlp and deno again, rewrites the unit and restarts the service. At the end the update checks that the service is running.
+
+| Option | What it does |
+| --- | --- |
+| `--version 0.3.0` | Installs this release instead of the latest, also an older one. |
+| `--force` | Installs the release even when it is the running version, e.g. to repair an installation. |
+
+Versions before 0.3.0 have no `tsmusic update`. Update them once with the install script and `--update`.
+
+To check the config by hand after editing it: `tsmusic --config /etc/tsmusic/config.toml check-config`.
 
 ## Without the script
 
