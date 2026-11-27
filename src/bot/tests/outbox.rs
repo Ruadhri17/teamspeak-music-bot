@@ -36,6 +36,7 @@ async fn failure_of_an_old_track_sends_nothing() {
     h.bot.finished(Ended {
         id: old,
         failure: Some("playback failed".to_owned()),
+        end_frame: true,
     });
     assert!(h.outbox().is_empty());
     assert_eq!(h.playing(), Some("b"));

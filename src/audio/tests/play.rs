@@ -76,7 +76,7 @@ fn whole_track_reports_ok_with_tagged_frames() {
 }
 
 #[test]
-fn failed_track_has_no_end_frame() {
+fn a_failed_track_still_gets_its_end_frame() {
     let mut run = start(
         "ffmpeg",
         AudioInput::Stream(Box::new(&b"this is not audio"[..])),
@@ -84,7 +84,50 @@ fn failed_track_has_no_end_frame() {
     );
     let result = run.done.recv_timeout(TIMEOUT).unwrap();
     assert!(result.is_err());
+    assert!(matches!(
+        run.frames.try_recv(),
+        Ok(Frame::End { stream: 7 })
+    ));
     assert!(run.frames.try_recv().is_err());
+}
+
+struct BreaksOff(std::io::Cursor<Vec<u8>>);
+
+impl std::io::Read for BreaksOff {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        match self.0.read(buf)? {
+            0 => Err(std::io::Error::other("yt-dlp exited with exit status: 1")),
+            n => Ok(n),
+        }
+    }
+}
+
+#[test]
+fn a_stream_that_breaks_off_plays_what_it_decoded_then_ends() {
+    let dir = tempfile::tempdir().unwrap();
+    let AudioInput::File(mut file) = sine(&dir, 2) else {
+        unreachable!()
+    };
+    let mut bytes = Vec::new();
+    std::io::Read::read_to_end(&mut file, &mut bytes).unwrap();
+    bytes.truncate(bytes.len() / 2);
+    let mut run = start(
+        "ffmpeg",
+        AudioInput::Stream(Box::new(BreaksOff(std::io::Cursor::new(bytes)))),
+        200,
+    );
+    let result = run.done.recv_timeout(TIMEOUT).unwrap();
+    assert!(matches!(result, Err(AudioError::Input(_))), "{result:?}");
+    let mut audio = 0;
+    let mut last = None;
+    while let Ok(frame) = run.frames.try_recv() {
+        if matches!(frame, Frame::Audio { .. }) {
+            audio += 1;
+        }
+        last = Some(frame);
+    }
+    assert!(audio > 30, "{audio} frames");
+    assert!(matches!(last, Some(Frame::End { stream: 7 })));
 }
 
 #[test]

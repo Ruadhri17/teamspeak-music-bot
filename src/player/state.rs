@@ -12,6 +12,9 @@ pub(crate) struct Ended {
     pub(crate) id: PlaybackId,
     /// `Some` when the track failed, with a reason that is safe to show on the chat.
     pub(crate) failure: Option<String>,
+    /// The stream's `Frame::End` is in the buffer, so `played` reports when the rest of
+    /// the track is heard. `false` only after a panic of the audio thread.
+    pub(crate) end_frame: bool,
 }
 
 /// The current track with everything needed to stop it.
