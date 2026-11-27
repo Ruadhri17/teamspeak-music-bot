@@ -69,9 +69,32 @@ async fn full_queue_before_a_playlist() {
     let mut h = with_max_len(1);
     assert!(h.add_outbox("!song add first").await.is_empty());
     assert!(h.add_outbox("!song add second").await.is_empty());
-    let outbox = h.add_outbox(&format!("!song add {LINK}PLthree")).await;
-    assert_eq!(outbox, on_channel("the queue is full (1 songs)"));
+    let reply = h.send(&format!("!song add {LINK}PLthree"));
+    assert_eq!(reply.as_deref(), Some("the queue is full (1 songs)"));
+    assert!(h.bot.pending.is_empty());
     assert_eq!(h.playing(), Some("first"));
+    assert_eq!(h.queued(), ["second"]);
+}
+
+#[tokio::test]
+async fn a_full_queue_takes_songs_again_after_a_removal() {
+    let mut h = with_max_len(1);
+    assert!(h.add_outbox("!song add first").await.is_empty());
+    assert!(h.add_outbox("!song add second").await.is_empty());
+    assert!(h.send("!song add third").is_some());
+    assert_eq!(h.send("!queue remove last"), None);
+    assert!(h.add_outbox("!song add third").await.is_empty());
+    assert_eq!(h.queued(), ["third"]);
+}
+
+#[tokio::test]
+async fn songs_still_looked_up_may_fill_the_queue_later() {
+    let mut h = with_max_len(1);
+    assert!(h.add_outbox("!song add first").await.is_empty());
+    assert_eq!(h.send("!song add second"), None);
+    assert_eq!(h.send("!song add third"), None);
+    h.settle().await;
+    assert_eq!(h.outbox(), on_channel("the queue is full (1 songs)"));
     assert_eq!(h.queued(), ["second"]);
 }
 
