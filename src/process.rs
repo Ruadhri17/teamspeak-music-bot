@@ -51,7 +51,9 @@ pub fn stop(child: &mut std::process::Child) {
 
 /// Stops one playback from any thread: sets a flag its threads check, and signals its
 /// processes at once. A thread blocked reading from a stalled process is freed too, which
-/// a flag alone cannot do. Clones share the same state.
+/// a flag alone cannot do. A process given a gentler signal than SIGKILL gets SIGKILL after
+/// `STOP_GRACE` if it still runs: the thread that would stop it may itself be blocked
+/// reading from it. Clones share the same state.
 #[derive(Clone, Debug, Default)]
 pub struct Stopper(Arc<Mutex<Stopping>>);
 
@@ -74,9 +76,13 @@ impl Stopper {
     pub fn stop(&self) {
         let mut stopping = self.lock();
         stopping.stopped = true;
-        for (pidfd, signal) in &stopping.processes {
-            let _ = pidfd_send_signal(pidfd, *signal);
-        }
+        let gentle: Vec<OwnedFd> = stopping
+            .processes
+            .iter()
+            .filter_map(|(pidfd, signal)| signal_and_keep(pidfd, *signal))
+            .collect();
+        drop(stopping);
+        kill_later(gentle);
     }
 
     pub fn is_stopped(&self) -> bool {
@@ -97,7 +103,9 @@ impl Stopper {
         };
         let mut stopping = self.lock();
         if stopping.stopped {
-            let _ = pidfd_send_signal(&pidfd, signal);
+            let gentle = signal_and_keep(&pidfd, signal);
+            drop(stopping);
+            kill_later(gentle.into_iter().collect());
         } else {
             stopping.processes.push((pidfd, signal));
         }
@@ -108,6 +116,28 @@ impl Stopper {
     fn lock(&self) -> MutexGuard<'_, Stopping> {
         self.0.lock().unwrap_or_else(PoisonError::into_inner)
     }
+}
+
+/// Sends `signal`, and returns a copy of the pidfd when the process may survive it.
+fn signal_and_keep(pidfd: &OwnedFd, signal: Signal) -> Option<OwnedFd> {
+    let _ = pidfd_send_signal(pidfd, signal);
+    (signal != Signal::KILL)
+        .then(|| pidfd.try_clone().ok())
+        .flatten()
+}
+
+/// SIGKILL after `STOP_GRACE` on a thread of its own, the caller does not wait. A process
+/// that has exited by then only makes the signal fail, the pidfd cannot reach another one.
+fn kill_later(pidfds: Vec<OwnedFd>) {
+    if pidfds.is_empty() {
+        return;
+    }
+    thread::spawn(move || {
+        thread::sleep(STOP_GRACE);
+        for pidfd in pidfds {
+            let _ = pidfd_send_signal(&pidfd, Signal::KILL);
+        }
+    });
 }
 
 /// A tokio child process that is stopped with `stop` semantics when dropped, for example
@@ -400,6 +430,48 @@ while :; do sleep 0.05; done"#;
         let mut child = sleeper();
         stopper.watch(&child, Signal::KILL);
         assert!(ended_by(&mut child, Signal::KILL));
+    }
+
+    fn ignoring_term() -> (Script, std::process::Child) {
+        let script = Script::new(IGNORES_TERM);
+        let child = script.command().spawn().unwrap();
+        script.wait_until_ready();
+        (script, child)
+    }
+
+    #[test]
+    fn stopper_kills_a_process_that_ignores_term_after_the_grace() {
+        let (_script, mut child) = ignoring_term();
+        let stopper = Stopper::new();
+        stopper.watch(&child, Signal::TERM);
+        let start = Instant::now();
+        stopper.stop();
+        assert!(start.elapsed() < STOP_GRACE);
+        thread::sleep(STOP_GRACE / 2);
+        assert!(child.try_wait().unwrap().is_none());
+        assert!(ended_by(&mut child, Signal::KILL));
+        assert!(start.elapsed() >= STOP_GRACE);
+    }
+
+    #[test]
+    fn a_process_watched_after_the_stop_is_killed_after_the_grace_too() {
+        let (_script, mut child) = ignoring_term();
+        let stopper = Stopper::new();
+        stopper.stop();
+        stopper.watch(&child, Signal::TERM);
+        assert!(ended_by(&mut child, Signal::KILL));
+    }
+
+    #[test]
+    fn a_process_that_obeys_term_is_not_killed() {
+        let script = Script::new(TRAPS_TERM);
+        let mut child = script.command().spawn().unwrap();
+        script.wait_until_ready();
+        let stopper = Stopper::new();
+        stopper.watch(&child, Signal::TERM);
+        stopper.stop();
+        assert_eq!(child.wait().unwrap().code(), Some(0));
+        assert!(exists(&script.term_file()));
     }
 
     #[test]
