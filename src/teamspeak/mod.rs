@@ -4,6 +4,7 @@
 //! - `connect`: building the connection from the config
 //! - `event`: `TeamspeakEvent` and translation from tsclientlib events
 //! - `frames`: which frame goes out next, the start buffer and the ends of streams
+//! - `reports`: the bot's channel and the end of connecting, retried while the bot is busy
 //! - `metrics`: the audio statistics summed up every `logging.metrics_interval`
 //! - `home`: the home channel and the decision for `!bot summon`
 //! - `request`: `TeamspeakRequest` and executing it on the connection
@@ -15,6 +16,7 @@ mod event;
 mod frames;
 mod home;
 mod metrics;
+mod reports;
 mod request;
 #[cfg(test)]
 mod tests;
@@ -49,6 +51,7 @@ use tsproto_packets::packets::{AudioData, CodecType, OutAudio};
 use frames::Frames;
 use home::ChannelInfo;
 use metrics::AudioMetrics;
+use reports::Reports;
 
 use crate::{
     audio::{self, FRAME_DURATION, Frame, Output},
@@ -106,7 +109,7 @@ pub struct Client {
     /// Known once connected, forgotten on a reconnect.
     home: Option<ChannelId>,
     /// The bot's channel as last sent to the bot, so only changes go out.
-    last_channel: Option<CurrentChannel>,
+    reports: Reports,
     description: String,
     /// `events.on_disconnect.message`, the reason users see when the bot leaves.
     disconnect_message: Option<String>,
@@ -149,7 +152,7 @@ impl Client {
             identity_path,
             home_config: config.teamspeak.home_channel.clone(),
             home: None,
-            last_channel: None,
+            reports: Reports::default(),
             description: config.teamspeak.description.clone(),
             disconnect_message: config.events.on_disconnect.message.clone(),
             permissions: config.permissions.clone(),
@@ -237,7 +240,7 @@ impl Client {
                 warn!("disconnected from the server ({reason:?}), reconnecting");
                 self.home = None;
                 // After the reconnect the channel is sent again, even if it is the same.
-                self.last_channel = None;
+                self.reports.reset();
                 // Commands of the old connection get no answer.
                 self.sent.clear();
             }
@@ -395,18 +398,7 @@ impl Client {
         let Some(current) = current_channel(state, home) else {
             return;
         };
-        if self.last_channel == Some(current) {
-            return;
-        }
-        match self.events.try_send(TeamspeakEvent::Channel(current)) {
-            Ok(()) => self.last_channel = Some(current),
-            // Not remembered as sent, so the next change on the server sends it again.
-            Err(TrySendError::Full(_)) => {
-                warn!("the bot is not keeping up, a change in its channel was not reported")
-            }
-            // The receiver is gone, which only happens during shutdown.
-            Err(TrySendError::Closed(_)) => {}
-        }
+        self.reports.channel(&self.events, current);
     }
 
     /// Tells the bot that the connection is ready, for `on_connect`. Only once the home
@@ -415,14 +407,7 @@ impl Client {
         if self.home.is_none() {
             return;
         }
-        match self.events.try_send(TeamspeakEvent::Connected) {
-            Ok(()) => {}
-            Err(TrySendError::Full(_)) => {
-                warn!("the bot is not keeping up, on_connect was not reported")
-            }
-            // The receiver is gone, which only happens during shutdown.
-            Err(TrySendError::Closed(_)) => {}
-        }
+        self.reports.connected(&self.events);
     }
 
     /// Saves the identity after tsclientlib raised its level for the server.
@@ -467,6 +452,7 @@ impl Client {
             }
         }
         self.report_played();
+        self.reports.retry(&self.events);
     }
 
     /// Tells the bot which streams were heard to their end. One the bot has no room for
