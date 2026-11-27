@@ -168,7 +168,7 @@ Send `!bot summon` to the bot in a private message. If the bot is in its home ch
 
 Without a number, the bot replies with the current volume. With a number, it sets the volume for all songs, for everyone in the channel; a `%` at the end is fine (`!bot volume 40%`). The change is heard right away, also in the middle of a song.
 
-The scale is logarithmic, like most volume controls: 50 is clearly quieter than 100, and below about 20 it gets very quiet. The bot administrator may set a highest allowed volume. The volume goes back to the default when the bot restarts.
+The scale is logarithmic, like most volume controls: 50 is clearly quieter than 100, and below about 20 it gets very quiet. The bot administrator may set a highest allowed volume. The volume goes back to the default when the bot restarts. Depending on its setup, the bot may also change the volume by itself, for example back to the default when it returns home, or for its welcome sound.
 
 ### `!bot ping`
 

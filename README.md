@@ -24,7 +24,7 @@ What the bot does today:
 - **Sound quality:** Opus Music at a configurable bitrate, 96 kb/s by default.
 - **Channels:** anyone can bring the bot from its home channel by dragging it or with `!bot summon`. While it plays in a channel, only admins can take it elsewhere. It returns home when nothing plays or when it is left alone, and the queue is cleared there.
 - **Permissions:** admins and blocked users by TeamSpeak server group, by name or ID.
-- **Events:** on connect, disconnect, idle, alone, party (people in the channel) and song start the bot can send a message, play a sound, move, and change its description or nickname, e.g. `Now playing: {song}`.
+- **Events:** the bot reacts when it connects or disconnects, when nothing plays, when it is left alone, when people are in its channel, and when a song starts. It can then set the volume, send a message, play a sound, move, and change its description or nickname, e.g. `Now playing: {song}`.
 - **A quiet chat:** the bot answers errors and questions, not every command. It points out typos (`did you mean !song?`) and ignores commands meant for other bots.
 - **Checked configuration:** a misspelled key or a wrong value stops the start with the line of the mistake. Passwords live in a separate file that the bot refuses to read when others can read it.
 - **Installer:** `tsmusic setup` installs ffmpeg, yt-dlp and deno and sets the bot up as a hardened systemd service. `tsmusic update` moves it to a new release after checking the config with the new version.
