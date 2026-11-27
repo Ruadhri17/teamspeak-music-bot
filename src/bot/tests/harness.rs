@@ -119,14 +119,17 @@ impl Harness {
 
     pub fn run(&mut self, actions: &[Action]) {
         self.bot.run_actions(actions.to_vec());
+        self.bot.end_turn();
     }
 
     pub fn channel(&mut self, current: CurrentChannel) {
         self.bot.channel_changed(Some(current));
+        self.bot.end_turn();
     }
 
     pub fn connected(&mut self) {
         self.bot.connected();
+        self.bot.end_turn();
     }
 
     pub fn sound(&self) -> Option<&str> {
@@ -146,12 +149,15 @@ impl Harness {
     }
 
     pub fn send_as(&mut self, reply_to: ReplyTo, author: &Author, text: &str) -> Option<String> {
-        self.bot.command(text, reply_to, author)
+        let reply = self.bot.command(text, reply_to, author);
+        self.bot.end_turn();
+        reply
     }
 
     pub async fn next_lookup(&mut self) {
         let joined = self.bot.lookups.join_next_with_id().await.unwrap();
         self.bot.lookup_done(joined);
+        self.bot.end_turn();
     }
 
     pub async fn add(&mut self, names: &[&str]) {
@@ -170,6 +176,7 @@ impl Harness {
     pub async fn settle(&mut self) {
         while let Some(joined) = self.bot.lookups.join_next_with_id().await {
             self.bot.lookup_done(joined);
+            self.bot.end_turn();
         }
     }
 
@@ -200,6 +207,7 @@ impl Harness {
             failure: None,
             end_frame: true,
         });
+        self.bot.end_turn();
     }
 
     pub fn finish_current_id(&mut self, id: PlaybackId) {
@@ -208,6 +216,7 @@ impl Harness {
             failure: None,
             end_frame: true,
         });
+        self.bot.end_turn();
     }
 
     pub fn track_heard(&mut self) {
@@ -223,11 +232,13 @@ impl Harness {
             failure: None,
             end_frame: true,
         });
+        self.bot.end_turn();
         self.played(id);
     }
 
     pub fn played(&mut self, id: PlaybackId) {
         self.bot.heard(id.0);
+        self.bot.end_turn();
     }
 
     pub fn fail_current(&mut self, reason: &str) {
@@ -237,6 +248,7 @@ impl Harness {
             failure: Some(reason.to_owned()),
             end_frame: true,
         });
+        self.bot.end_turn();
     }
 
     pub fn outbox(&mut self) -> Vec<(ReplyTo, String)> {

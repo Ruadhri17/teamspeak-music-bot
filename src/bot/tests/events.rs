@@ -670,3 +670,56 @@ async fn a_song_that_starts_when_the_idle_time_is_up_keeps_playing() {
     assert_eq!(h.playing(), Some("a"));
     assert!(h.teamspeak_requests().is_empty());
 }
+
+fn with_welcomes(party_sound: bool) -> Harness {
+    Harness::with_config_in(|config, dir| {
+        config.events.on_connect = Event {
+            sound: Some(Sound::File(dir.join("hi.wav"))),
+            ..Event::default()
+        };
+        config.events.on_party = Event {
+            sound: party_sound.then(|| Sound::File(dir.join("bye.wav"))),
+            ..Event::default()
+        };
+    })
+}
+
+async fn welcome_with_a_song_waiting(h: &mut Harness) {
+    h.channel(home_channel());
+    h.connected();
+    assert_eq!(h.sound(), Some("hi.wav"));
+    h.add(&["a.mp3"]).await;
+    assert_eq!(h.queued(), ["a"]);
+}
+
+#[tokio::test]
+async fn a_move_during_the_welcome_starts_the_songs_that_waited() {
+    let mut h = with_welcomes(false);
+    welcome_with_a_song_waiting(&mut h).await;
+    h.channel(room_with_people(2));
+    assert_eq!(h.sound(), None);
+    assert_eq!(h.playing(), Some("a"));
+}
+
+#[tokio::test]
+async fn a_move_during_the_welcome_to_a_new_welcome_waits_for_it() {
+    let mut h = with_welcomes(true);
+    welcome_with_a_song_waiting(&mut h).await;
+    h.channel(room_with_people(2));
+    assert_eq!(h.sound(), Some("bye.wav"));
+    assert_eq!(h.queued(), ["a"]);
+    h.sound_heard();
+    assert_eq!(h.playing(), Some("a"));
+}
+
+#[tokio::test]
+async fn a_move_home_during_the_welcome_clears_the_songs() {
+    let mut h = with_welcomes(false);
+    h.channel(room_with_people(2));
+    h.connected();
+    assert_eq!(h.sound(), Some("hi.wav"));
+    h.add(&["a.mp3"]).await;
+    h.channel(home_channel());
+    assert!(h.is_idle());
+    assert!(h.queued().is_empty());
+}

@@ -140,11 +140,32 @@ impl Bot {
                     self.run_actions(actions);
                 }
             }
-            // After every branch, not in each command: music starts and stops through
-            // commands, finished tracks and event actions alike.
-            self.events
-                .playing(self.player.is_playing(), Instant::now());
+            self.end_turn();
             self.send_outbox().await;
+        }
+    }
+
+    /// After every turn of `run`, whatever happened in it: songs that waited for something
+    /// that is over start, and the events learn whether music plays, for their deadlines.
+    fn end_turn(&mut self) {
+        self.start_waiting_songs();
+        self.events
+            .playing(self.player.is_playing(), Instant::now());
+    }
+
+    /// The one place that starts songs that waited: for the sound of an event, which ended,
+    /// or was cut short by a move. Nothing plays (a sound of an event playing is not idle
+    /// either), nothing holds a pause, no event waits for its sound, and the queue has
+    /// songs. A new welcome in the same turn plays first, the songs wait for it. Only
+    /// ending a goodbye starts songs elsewhere, see `end_goodbye`.
+    fn start_waiting_songs(&mut self) {
+        if self.waiting.is_none()
+            && self.player.is_idle()
+            && !self.player.is_held()
+            && !self.player.queue_is_empty()
+        {
+            self.player.start_queue();
+            self.report();
         }
     }
 

@@ -191,15 +191,12 @@ impl Bot {
         })
     }
 
-    /// The sound of an event ended. The rest of the event runs, and after a welcome or
-    /// `on_connect` the tracks that waited for it start.
+    /// The sound of an event ended, the rest of the event runs. Tracks that waited for a
+    /// welcome or `on_connect` start at the end of the turn, see `Bot::start_waiting_songs`.
     pub(super) fn sound_ended(&mut self) {
         let Some(trigger) = self.waiting.take() else {
             return;
         };
-        if !trigger.is_leaving() {
-            self.player.start_queue();
-        }
         self.run_rest(trigger);
     }
 
