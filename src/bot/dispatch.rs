@@ -50,6 +50,11 @@ impl Bot {
                     .to_string(),
             ),
             Command::Add { query, source, .. } => {
+                // Refused at once: after the lookup it would be refused anyway, and a lookup
+                // can be a yt-dlp run of several seconds of CPU on a small server.
+                if let Some(full) = self.player.queue_full() {
+                    return Some(full.to_string());
+                }
                 self.add(query, source, reply_to);
                 None
             }

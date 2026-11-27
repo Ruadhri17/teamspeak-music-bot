@@ -36,13 +36,18 @@ impl Queue {
     }
 
     pub(super) fn push(&mut self, track: TrackRef) -> Result<(), QueueFull> {
-        if let Some(max) = self.max_len
-            && self.tracks.len() >= max.get()
-        {
-            return Err(QueueFull(max));
+        if let Some(full) = self.full() {
+            return Err(full);
         }
         self.tracks.push_back(track);
         Ok(())
+    }
+
+    /// `Some` when the queue takes no more songs.
+    pub(super) fn full(&self) -> Option<QueueFull> {
+        self.max_len
+            .filter(|max| self.tracks.len() >= max.get())
+            .map(QueueFull)
     }
 
     pub(super) fn pop_next(&mut self) -> Option<TrackRef> {
@@ -93,6 +98,11 @@ impl Player {
     /// A page of the queue, `None` when the page is past the end.
     pub fn queue_page(&self, number: NonZeroUsize, size: NonZeroUsize) -> Option<Page<'_>> {
         self.queue.page(number, size)
+    }
+
+    /// `Some` when the queue takes no more songs, so `!song add` can refuse before a lookup.
+    pub fn queue_full(&self) -> Option<QueueFull> {
+        self.queue.full()
     }
 
     /// `position` as shown by `!queue show`, or the last song.
