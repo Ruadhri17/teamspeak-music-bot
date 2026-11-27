@@ -4,7 +4,7 @@
 //! - `connect`: building the connection from the config
 //! - `event`: `TeamspeakEvent` and translation from tsclientlib events
 //! - `frames`: which frame goes out next, the start buffer and the ends of streams
-//! - `reports`: the bot's channel and the end of connecting, retried while the bot is busy
+//! - `state`: the bot's channel, connecting and the heard streams, as values for the bot
 //! - `metrics`: the audio statistics summed up every `logging.metrics_interval`
 //! - `home`: the home channel and the decision for `!bot summon`
 //! - `request`: `TeamspeakRequest` and executing it on the connection
@@ -16,8 +16,8 @@ mod event;
 mod frames;
 mod home;
 mod metrics;
-mod reports;
 mod request;
+mod state;
 #[cfg(test)]
 mod tests;
 
@@ -25,11 +25,7 @@ pub use error::{TeamspeakError, TeamspeakResult};
 pub use event::{Author, CurrentChannel, ReplyTo, TeamspeakEvent};
 pub use request::TeamspeakRequest;
 
-use std::{
-    collections::{HashMap, VecDeque},
-    path::PathBuf,
-    time::Duration,
-};
+use std::{collections::HashMap, path::PathBuf, time::Duration};
 
 use futures::{StreamExt, future};
 use tokio::{
@@ -51,7 +47,7 @@ use tsproto_packets::packets::{AudioData, CodecType, OutAudio};
 use frames::Frames;
 use home::ChannelInfo;
 use metrics::AudioMetrics;
-use reports::Reports;
+pub use state::{StateRx, StateTx, state};
 
 use crate::{
     audio::{self, FRAME_DURATION, Frame, Output},
@@ -87,14 +83,14 @@ impl Default for AudioControl {
 
 pub struct Client {
     connection: Connection,
-    /// To the rest of the bot.
+    /// Chat messages to the rest of the bot.
     events: mpsc::Sender<TeamspeakEvent>,
+    /// The bot's channel, connecting and the heard streams, as values the bot reads.
+    state: StateTx,
     /// From the rest of the bot.
     requests: mpsc::Receiver<TeamspeakRequest>,
     /// PCM frames from the audio thread, one encoded and sent per tick.
     frames: Frames,
-    /// Streams heard to their end that the bot had no room for yet.
-    unreported: VecDeque<u64>,
     metrics: AudioMetrics,
     metrics_interval: Duration,
     control: watch::Receiver<AudioControl>,
@@ -108,8 +104,6 @@ pub struct Client {
     home_config: Option<ChannelRef>,
     /// Known once connected, forgotten on a reconnect.
     home: Option<ChannelId>,
-    /// The bot's channel as last sent to the bot, so only changes go out.
-    reports: Reports,
     description: String,
     /// `events.on_disconnect.message`, the reason users see when the bot leaves.
     disconnect_message: Option<String>,
@@ -124,15 +118,32 @@ pub struct Client {
     shutdown: CancellationToken,
 }
 
+/// The client's ends of the channels to the rest of the bot.
+pub struct ClientChannels {
+    /// Chat messages to the bot.
+    pub events: mpsc::Sender<TeamspeakEvent>,
+    /// The bot's channel, connecting and the heard streams.
+    pub state: StateTx,
+    /// What the bot wants done on the server.
+    pub requests: mpsc::Receiver<TeamspeakRequest>,
+    /// PCM frames from the audio thread.
+    pub frames: mpsc::Receiver<Frame>,
+    /// Volume, pause and the streams to drop, set by the player.
+    pub control: watch::Receiver<AudioControl>,
+}
+
 impl Client {
     /// Loads the identity (or creates it on the first start) and starts connecting.
     pub fn new(
         config: &Config,
         secrets: &TeamspeakSecrets,
-        events: mpsc::Sender<TeamspeakEvent>,
-        requests: mpsc::Receiver<TeamspeakRequest>,
-        frames: mpsc::Receiver<Frame>,
-        control: watch::Receiver<AudioControl>,
+        ClientChannels {
+            events,
+            state,
+            requests,
+            frames,
+            control,
+        }: ClientChannels,
         shutdown: CancellationToken,
     ) -> TeamspeakResult<Self> {
         let identity_path = config.paths.state_dir.join(&config.teamspeak.identity_file);
@@ -140,9 +151,9 @@ impl Client {
         Ok(Self {
             connection: connect::connect(&config.teamspeak, secrets, identity)?,
             events,
+            state,
             requests,
             frames: Frames::new(frames, audio::frames_in(config.audio.start_buffer)),
-            unreported: VecDeque::new(),
             metrics: AudioMetrics::default(),
             metrics_interval: config.logging.metrics_interval,
             control,
@@ -152,7 +163,6 @@ impl Client {
             identity_path,
             home_config: config.teamspeak.home_channel.clone(),
             home: None,
-            reports: Reports::default(),
             description: config.teamspeak.description.clone(),
             disconnect_message: config.events.on_disconnect.message.clone(),
             permissions: config.permissions.clone(),
@@ -240,7 +250,7 @@ impl Client {
                 warn!("disconnected from the server ({reason:?}), reconnecting");
                 self.home = None;
                 // After the reconnect the channel is sent again, even if it is the same.
-                self.reports.reset();
+                self.state.channel(None);
                 // Commands of the old connection get no answer.
                 self.sent.clear();
             }
@@ -385,9 +395,8 @@ impl Client {
         }
     }
 
-    /// Sends the bot's channel when it changed: the bot moved, or someone came or left.
-    /// Waits for the home channel, `at_home` needs it. Never waits for the bot, like
-    /// `forward_events`.
+    /// The bot's channel as it is now: the bot moved, or someone came or left. Waits for
+    /// the home channel, `at_home` needs it.
     fn report_channel(&mut self) {
         let Some(home) = self.home else {
             return;
@@ -398,16 +407,16 @@ impl Client {
         let Some(current) = current_channel(state, home) else {
             return;
         };
-        self.reports.channel(&self.events, current);
+        self.state.channel(Some(current));
     }
 
-    /// Tells the bot that the connection is ready, for `on_connect`. Only once the home
-    /// channel is known, like `report_channel`.
+    /// The connection is ready, for `on_connect`. Only once the home channel is known,
+    /// like `report_channel`.
     fn report_connected(&mut self) {
         if self.home.is_none() {
             return;
         }
-        self.reports.connected(&self.events);
+        self.state.connected();
     }
 
     /// Saves the identity after tsclientlib raised its level for the server.
@@ -451,25 +460,8 @@ impl Client {
                 }
             }
         }
-        self.report_played();
-        self.reports.retry(&self.events);
-    }
-
-    /// Tells the bot which streams were heard to their end. One the bot has no room for
-    /// waits for a later tick: a lost end would leave an event waiting for its sound.
-    fn report_played(&mut self) {
-        self.unreported.extend(self.frames.take_ended());
-        while let Some(&stream) = self.unreported.front() {
-            match self.events.try_send(TeamspeakEvent::Played(stream)) {
-                // `Closed` means the bot is gone, which only happens during shutdown.
-                Ok(()) | Err(TrySendError::Closed(_)) => {
-                    self.unreported.pop_front();
-                }
-                Err(TrySendError::Full(_)) => {
-                    debug!("the bot is not keeping up, the end of stream {stream} waits");
-                    return;
-                }
-            }
+        for stream in self.frames.take_ended() {
+            self.state.heard(stream);
         }
     }
 

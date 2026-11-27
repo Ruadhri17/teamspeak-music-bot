@@ -32,7 +32,7 @@ use cli::{Cli, Command};
 use config::{Config, ConfigLocation, LogLevel};
 use player::AudioLauncher;
 use secrets::Secrets;
-use teamspeak::{AudioControl, Client};
+use teamspeak::{AudioControl, Client, ClientChannels};
 use tokio::{
     signal::unix::{SignalKind, signal},
     sync::{mpsc, watch},
@@ -208,24 +208,32 @@ async fn run(location: &ConfigLocation, log_level: Option<LogLevel>) -> anyhow::
     let mut sigterm = signal(SignalKind::terminate())?;
 
     let (events_tx, events_rx) = mpsc::channel(64);
+    // The client's state as values, nothing waits and nothing is lost, see `teamspeak::state`.
+    let (state_tx, state_rx) = teamspeak::state();
     let (requests_tx, requests_rx) = mpsc::channel(64);
     // `audio.max_buffer` of audio waits for the client, the audio thread blocks when it is full.
     let (frames_tx, frames_rx) = mpsc::channel(audio::frames_in(config.audio.max_buffer));
 
     let (control_tx, control_rx) = watch::channel(AudioControl::default());
 
-    let client = Client::new(
-        &config,
-        &secrets.teamspeak,
-        events_tx,
-        requests_rx,
-        frames_rx,
-        control_rx,
-        shutdown.clone(),
-    )?;
+    let channels = ClientChannels {
+        events: events_tx,
+        state: state_tx,
+        requests: requests_rx,
+        frames: frames_rx,
+        control: control_rx,
+    };
+    let client = Client::new(&config, &secrets.teamspeak, channels, shutdown.clone())?;
     let mut client = tokio::spawn(client.run());
     let launcher = Box::new(AudioLauncher::new(&config, frames_tx));
-    let bot = Bot::new(events_rx, requests_tx, control_tx, launcher, &config);
+    let bot = Bot::new(
+        events_rx,
+        state_rx,
+        requests_tx,
+        control_tx,
+        launcher,
+        &config,
+    );
     // Stops by itself once the client exits and the events channel closes.
     let mut bot = tokio::spawn(bot.run());
 

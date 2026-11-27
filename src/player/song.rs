@@ -238,33 +238,32 @@ impl Player {
         }
     }
 
-    /// The client sent the last frame of `stream`. Ends the sound of an event when it is
-    /// still the current one. For a track, its tail is gone and the next track is heard.
-    pub fn played(&mut self, stream: u64) {
+    /// Every stream up to `heard` was heard to its end: the client reports only the latest,
+    /// so several may have ended since the last call. Ends the sound of an event when it is
+    /// still the current one. For tracks, their tails are gone and the next track is heard,
+    /// and a current track that is heard already must not wait for its end in `finished`.
+    pub fn played(&mut self, heard: u64) {
         if let State::Playing(playback) = &self.state
             && playback.kind == Kind::Sound
-            && playback.id.0 == stream
+            && playback.id.0 <= heard
         {
             self.state = State::Idle;
             self.notices.push(Notice::SoundEnded);
             return;
         }
         let before = self.tails.len();
-        while self.tails.front().is_some_and(|tail| tail.id.0 <= stream) {
+        while self.tails.front().is_some_and(|tail| tail.id.0 <= heard) {
             self.tails.pop_front();
-        }
-        if self.tails.len() < before {
-            if self.track_heard() {
-                self.notices.push(Notice::SongStarted);
-            }
-            return;
         }
         // The end came before `finished`, which then must not wait for it.
         if let Some(playback) = self.state.playback()
             && playback.kind == Kind::Track
-            && playback.id.0 == stream
+            && playback.id.0 <= heard
         {
             self.played_early = Some(playback.id);
+        }
+        if self.tails.len() < before && self.track_heard() {
+            self.notices.push(Notice::SongStarted);
         }
     }
 

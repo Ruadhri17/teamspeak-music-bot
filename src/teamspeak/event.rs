@@ -3,6 +3,8 @@ use tsclientlib::{ClientId, Invoker, MessageTarget, events::Event};
 use crate::permissions::Role;
 
 /// Server event in our own types, so the rest of the bot does not depend on tsclientlib.
+/// Only events: the bot's channel, connecting and the heard streams are states, see
+/// `state`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TeamspeakEvent {
     /// Chat message in the bot's channel, a private message or a poke to the bot.
@@ -11,13 +13,6 @@ pub enum TeamspeakEvent {
         author: Author,
         text: String,
     },
-    /// The bot moved, or someone came to or left its channel.
-    Channel(CurrentChannel),
-    /// The bot connected or reconnected and knows its home channel. Comes after the first
-    /// `Channel` of the connection.
-    Connected,
-    /// The last frame of the playback with this number went out, it was heard to its end.
-    Played(u64),
 }
 
 /// Who sent a message, as the client sees them when it arrives.
