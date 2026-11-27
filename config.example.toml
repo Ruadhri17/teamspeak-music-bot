@@ -111,4 +111,6 @@ ffmpeg_path = "ffmpeg"              # [live]
 
 [logging]
 level = "info"                      # [live] error | warn | info | debug | trace (RUST_LOG takes precedence)
-metrics_interval = "60s"            # [restart] how often the audio statistics go to the log: frames, encoding time, underruns, late ticks. Nothing while silent
+# Audio statistics while playing: frames, encoding time, underruns, late ticks.
+# Logged at debug, and at warn when the audio clock stalled or the buffer ran dry.
+metrics_interval = "60s"            # [restart] how often they are summed up

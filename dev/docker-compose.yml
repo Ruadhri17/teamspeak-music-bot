@@ -36,6 +36,9 @@ services:
     profiles: [bot]
     restart: unless-stopped
     depends_on: [ts3]
+    # The audio statistics are logged at debug, dev/bench.py reads them.
+    environment:
+      RUST_LOG: info,tsmusic::teamspeak=debug
     volumes:
       - ./bot/config.toml:/bot/config.toml:ro
       - bot-state:/bot/state

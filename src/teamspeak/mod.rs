@@ -4,7 +4,7 @@
 //! - `connect`: building the connection from the config
 //! - `event`: `TeamspeakEvent` and translation from tsclientlib events
 //! - `frames`: which frame goes out next, the start buffer and the ends of streams
-//! - `metrics`: the audio statistics logged every `logging.metrics_interval`
+//! - `metrics`: the audio statistics summed up every `logging.metrics_interval`
 //! - `home`: the home channel and the decision for `!bot summon`
 //! - `request`: `TeamspeakRequest` and executing it on the connection
 //! - `error`: `TeamspeakError` for the whole module
@@ -205,8 +205,10 @@ impl Client {
                     self.send_frame();
                 }
                 _ = metrics.tick() => {
-                    if let Some(line) = self.metrics.report() {
-                        info!("{line}");
+                    match self.metrics.report() {
+                        Some(report) if report.trouble => warn!("{}", report.line),
+                        Some(report) => debug!("{}", report.line),
+                        None => {}
                     }
                 }
                 _ = self.shutdown.cancelled() => break,
