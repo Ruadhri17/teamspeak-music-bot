@@ -9,6 +9,7 @@ use std::{
 };
 
 use anyhow::{Context, bail};
+use tempfile::TempDir;
 
 use super::plan::{self, Download, Package, PackageManager, Tool};
 
@@ -19,17 +20,19 @@ pub struct Runner {
     dry_run: bool,
     /// The commands of a dry run since the last `take_shown`.
     shown: Vec<String>,
-    /// Downloads and files before they are installed, removed on drop.
-    work: PathBuf,
+    /// Downloads and files before they are installed: a new directory with a random name,
+    /// created on first use and removed on drop. A name another user could guess, such as
+    /// one with the PID, could be prepared by them in `/tmp` with links inside, and setup
+    /// runs as root and executes a downloaded binary from here.
+    work: Option<TempDir>,
 }
 
 impl Runner {
     pub fn new(dry_run: bool) -> Self {
-        let work = std::env::temp_dir().join(format!("tsmusic-setup-{}", std::process::id()));
         Self {
             dry_run,
             shown: Vec::new(),
-            work,
+            work: None,
         }
     }
 
@@ -122,22 +125,28 @@ impl Runner {
         ])
     }
 
-    /// A path in the work directory, which is created on first use.
+    /// A path in the work directory, which is created on first use. A dry run creates
+    /// nothing and shows a placeholder for the random part of the name.
     fn work_file(&mut self, name: impl AsRef<Path>) -> anyhow::Result<PathBuf> {
-        if !self.dry_run {
-            fs::create_dir_all(&self.work)
-                .with_context(|| format!("cannot create {}", self.work.display()))?;
-            fs::set_permissions(&self.work, fs::Permissions::from_mode(0o700))?;
+        if self.dry_run {
+            return Ok(std::env::temp_dir().join("tsmusic-setup-XXXXXX").join(name));
         }
-        Ok(self.work.join(name))
+        let dir = match &self.work {
+            Some(dir) => dir,
+            None => self.work.insert(work_dir()?),
+        };
+        Ok(dir.path().join(name))
     }
 }
 
-impl Drop for Runner {
-    fn drop(&mut self) {
-        // Only temporary copies, a leftover in /tmp is harmless.
-        let _ = fs::remove_dir_all(&self.work);
-    }
+/// Created atomically under a random name, owned by the running user with mode `0700`.
+/// `tempfile` follows the umask unless told otherwise, so the mode is set explicitly.
+fn work_dir() -> anyhow::Result<TempDir> {
+    tempfile::Builder::new()
+        .prefix("tsmusic-setup-")
+        .permissions(fs::Permissions::from_mode(0o700))
+        .tempdir()
+        .context("cannot create a work directory in the temporary directory")
 }
 
 fn install_file(
@@ -248,4 +257,67 @@ pub fn install_binary(runner: &mut Runner) -> anyhow::Result<bool> {
     }
     install_file(runner, &current, plan::BIN, "0755", ("root", "root"))?;
     Ok(true)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::os::unix::fs::MetadataExt;
+
+    use super::*;
+
+    #[test]
+    fn the_work_directory_is_private_and_new() {
+        let mut runner = Runner::new(false);
+        let file = runner.work_file("yt-dlp").unwrap();
+        let dir = file.parent().unwrap().to_path_buf();
+        let meta = fs::metadata(&dir).unwrap();
+        assert_eq!(meta.permissions().mode() & 0o777, 0o700);
+        assert_eq!(meta.uid(), rustix::process::geteuid().as_raw());
+        assert_ne!(
+            dir.file_name().unwrap().to_string_lossy(),
+            format!("tsmusic-setup-{}", std::process::id())
+        );
+        assert_eq!(
+            runner.work_file("sums").unwrap().parent(),
+            Some(dir.as_path())
+        );
+    }
+
+    #[test]
+    fn a_prepared_directory_with_the_old_name_is_not_used() {
+        let prepared = std::env::temp_dir().join(format!("tsmusic-setup-{}", std::process::id()));
+        fs::create_dir_all(&prepared).unwrap();
+        let mut runner = Runner::new(false);
+        let file = runner.work_file("yt-dlp").unwrap();
+        assert!(!file.starts_with(&prepared));
+        fs::remove_dir_all(&prepared).unwrap();
+    }
+
+    #[test]
+    fn every_runner_gets_its_own_directory() {
+        let mut first = Runner::new(false);
+        let mut second = Runner::new(false);
+        assert_ne!(
+            first.work_file("x").unwrap().parent(),
+            second.work_file("x").unwrap().parent()
+        );
+    }
+
+    #[test]
+    fn the_work_directory_is_removed_with_the_runner() {
+        let mut runner = Runner::new(false);
+        let file = runner.work_file("yt-dlp").unwrap();
+        fs::write(&file, b"x").unwrap();
+        let dir = file.parent().unwrap().to_path_buf();
+        drop(runner);
+        assert!(!dir.exists());
+    }
+
+    #[test]
+    fn a_dry_run_creates_nothing() {
+        let mut runner = Runner::new(true);
+        let file = runner.work_file("yt-dlp").unwrap();
+        assert!(file.to_string_lossy().contains("tsmusic-setup-XXXXXX"));
+        assert!(!file.parent().unwrap().exists());
+    }
 }
