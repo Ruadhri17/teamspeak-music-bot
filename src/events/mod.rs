@@ -124,6 +124,8 @@ impl Events {
         if moved {
             actions.push(Action::Moved { home: new.at_home });
             self.departing = false;
+            // A welcome due in the old channel is not for the people of the new one.
+            self.party_at = None;
             // A new channel is a fresh start, people get the full idle time.
             if !self.playing {
                 self.idle_since = Some(now);
@@ -233,7 +235,7 @@ impl Events {
 
         if self.party_at.is_some_and(|at| at <= now) {
             self.party_at = None;
-            if !self.playing && !self.departing {
+            if !self.playing && !self.departing && !channel.at_home {
                 actions.push(Action::Run(Trigger::Party));
             }
         }
