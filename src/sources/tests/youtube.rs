@@ -1063,3 +1063,45 @@ async fn without_a_cookie_file_no_cookies_are_passed() {
         .unwrap();
     assert!(!runs(&dir)[0].contains("--cookies"));
 }
+
+#[test]
+fn a_start_that_hangs_is_stopped_and_retried() {
+    let (dir, path) = fake_yt_dlp(&logged(
+        r#"[ "$run" -ge 2 ] || exec sleep 30; printf audio"#,
+    ));
+    let start = Instant::now();
+    let mut data = Vec::new();
+    open_stream(&path).read_to_end(&mut data).unwrap();
+    assert_eq!(data, b"audio");
+    assert_eq!(runs(&dir).len(), 2);
+    assert!(start.elapsed() >= Duration::from_millis(500));
+    assert!(start.elapsed() < Duration::from_secs(5));
+}
+
+#[test]
+fn a_start_that_hangs_without_retries_fails() {
+    let (dir, path) = fake_yt_dlp(&logged("exec sleep 30"));
+    let err = open_once(&path, Clients::Default)
+        .read_to_end(&mut Vec::new())
+        .unwrap_err();
+    assert!(err.to_string().contains("yt-dlp exited"), "{err}");
+    assert_eq!(runs(&dir).len(), 1);
+}
+
+#[test]
+fn a_slow_start_within_the_limit_is_kept() {
+    let (dir, path) = fake_yt_dlp(&logged("sleep 0.2; printf audio"));
+    let mut data = Vec::new();
+    open_stream(&path).read_to_end(&mut data).unwrap();
+    assert_eq!(data, b"audio");
+    assert_eq!(runs(&dir).len(), 1);
+}
+
+#[test]
+fn a_pause_after_the_first_byte_is_not_a_hung_start() {
+    let (dir, path) = fake_yt_dlp(&logged("printf a; sleep 1; printf b"));
+    let mut data = Vec::new();
+    open_stream(&path).read_to_end(&mut data).unwrap();
+    assert_eq!(data, b"ab");
+    assert_eq!(runs(&dir).len(), 1);
+}

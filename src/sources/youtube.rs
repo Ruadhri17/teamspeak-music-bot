@@ -5,6 +5,7 @@ use std::{
     num::NonZeroUsize,
     process::{Child, ChildStdout, ExitStatus, Stdio},
     str::FromStr,
+    sync::mpsc::{self as sync_mpsc, RecvTimeoutError},
     thread::{self, JoinHandle},
     time::Duration,
 };
@@ -30,6 +31,14 @@ const OPEN_ATTEMPTS: u32 = 3;
 /// Seconds `yt-dlp` waits for a silent connection while streaming before it gives up,
 /// so a stalled stream ends (and is retried or fails) instead of playing silence forever.
 const STREAM_SOCKET_TIMEOUT: &str = "20";
+/// How long one attempt may take to send its first byte. The socket timeout covers one
+/// request, not the whole run: `yt-dlp` retries on its own and can wait for minutes.
+/// Opening takes up to about 20 s on a small VPS, so this leaves room.
+const START_TIMEOUT: Duration = if cfg!(test) {
+    Duration::from_millis(500)
+} else {
+    Duration::from_secs(60)
+};
 
 /// Never contains the rejected text, the message may go to the chat.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
@@ -467,6 +476,7 @@ impl Stream {
             .stderr(Stdio::piped())
             .spawn()?;
         stop.watch(&child, Signal::TERM);
+        let first_byte = watch_start(&child);
 
         // Both are `Some`, they were set to `piped` above.
         let stdout = child.stdout.take().expect("stdout is piped");
@@ -478,6 +488,7 @@ impl Stream {
             child,
             stdout,
             stderr: Some(stderr),
+            first_byte: Some(first_byte),
             _cookies: cookies,
         })
     }
@@ -504,7 +515,11 @@ impl Read for ChildReader {
         loop {
             let n = self.running.stdout.read(buf)?;
             if n > 0 || buf.is_empty() {
-                self.started |= n > 0;
+                if n > 0 {
+                    self.started = true;
+                    // Dropping it tells the watchdog the stream started.
+                    self.running.first_byte = None;
+                }
                 return Ok(n);
             }
             if self.stop.is_stopped() {
@@ -529,12 +544,33 @@ impl Read for ChildReader {
     }
 }
 
+/// Stops `child` when it has sent nothing after `START_TIMEOUT`: SIGTERM, then SIGKILL.
+/// Its stdout then ends, and `ChildReader` retries like after any failure before the first
+/// byte. Dropping the returned sender ends the watch.
+fn watch_start(child: &Child) -> sync_mpsc::Sender<()> {
+    let (first_byte, started) = sync_mpsc::channel::<()>();
+    let attempt = Stopper::new();
+    attempt.watch(child, Signal::TERM);
+    thread::spawn(move || {
+        if let Err(RecvTimeoutError::Timeout) = started.recv_timeout(START_TIMEOUT) {
+            warn!(
+                "yt-dlp sent no audio in {} s, stopping it",
+                START_TIMEOUT.as_secs()
+            );
+            attempt.stop();
+        }
+    });
+    first_byte
+}
+
 /// One running `yt-dlp`. Dropping it stops the process, see `process::stop`.
 struct Running {
     child: Child,
     stdout: ChildStdout,
     /// Taken when the process ends, so the tail is logged once.
     stderr: Option<JoinHandle<String>>,
+    /// Dropped at the first byte or with the process, which ends its `watch_start`.
+    first_byte: Option<sync_mpsc::Sender<()>>,
     /// Fields drop after `drop` has stopped the process, so it never loses its cookies.
     _cookies: Option<CookieCopy>,
 }
