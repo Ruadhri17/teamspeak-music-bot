@@ -83,7 +83,7 @@ move_to = "home"                    # [live]
 
 [queue]
 # max_len = 1000                    # [live] not set = unlimited
-show_page_size = 15                 # [live] entries per page in !queue show
+show_page_size = 15                 # [live] entries per page in !queue show, 1-30
 
 [permissions]
 # Server groups by name (case-insensitive) or ID, e.g. ["Admin", 6].

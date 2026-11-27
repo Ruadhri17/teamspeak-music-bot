@@ -12,6 +12,10 @@ use super::{
     TeamspeakConfig, Volume,
 };
 
+/// A page of `!queue show` is one chat message, more entries would leave each title only
+/// a few characters.
+const MAX_PAGE_SIZE: usize = 30;
+
 /// TeamSpeak refuses nicknames outside this length (in characters).
 const NICKNAME_LEN: RangeInclusive<usize> = 3..=30;
 
@@ -56,6 +60,12 @@ pub fn validate(config: &Config) -> Result<(), ValidationError> {
     optional_path(
         "sources.youtube.cookies_file",
         config.sources.youtube.cookies_file.as_deref(),
+    )?;
+
+    ensure(
+        config.queue.show_page_size.get() <= MAX_PAGE_SIZE,
+        "queue.show_page_size",
+        || format!("must be at most {MAX_PAGE_SIZE}, a page is one chat message"),
     )?;
 
     // `tokio::time::interval` panics on a zero period.

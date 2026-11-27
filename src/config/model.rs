@@ -245,7 +245,7 @@ pub enum Destination {
 pub struct QueueConfig {
     /// `None` = unlimited.
     pub max_len: Option<NonZeroUsize>,
-    /// Entries per page in `!queue show`.
+    /// Entries per page in `!queue show`, at most 30: a page is one chat message.
     pub show_page_size: NonZeroUsize,
 }
 
