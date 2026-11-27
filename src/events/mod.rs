@@ -3,8 +3,12 @@
 //! the TeamSpeak client sends it itself.
 //!
 //! A state machine without I/O: it gets facts (connecting, the bot's channel, whether music
-//! plays, a song that started, the time) and returns `Action`s for the bot. Deadlines are `Instant`s, the bot sleeps
-//! until `next_deadline` and calls `tick`. Tests pass the time directly.
+//! plays, a song that started, the time) and returns `Action`s for the bot. Deadlines are
+//! `Instant`s, the bot sleeps until `next_deadline` and calls `tick`. Tests pass the time
+//! directly.
+//!
+//! Every call that can fire an event takes whether music plays at that moment, so a timer
+//! never acts on an old answer: a song that started in the same turn keeps `on_idle` away.
 
 use tokio::time::Instant;
 
@@ -116,7 +120,8 @@ impl Events {
     }
 
     /// The client reported the channel: the bot moved, or someone came or left.
-    pub fn channel(&mut self, new: CurrentChannel, now: Instant) -> Vec<Action> {
+    pub fn channel(&mut self, new: CurrentChannel, playing: bool, now: Instant) -> Vec<Action> {
+        self.playing(playing, now);
         let old = self.channel.replace(new);
         let mut actions = Vec::new();
 
@@ -145,23 +150,26 @@ impl Events {
             }
         }
 
-        actions.extend(self.tick(now));
+        actions.extend(self.due(now));
         actions
     }
 
     /// The client connected to the server, also after a reconnect.
-    pub fn connected(&mut self, now: Instant) -> Vec<Action> {
+    pub fn connected(&mut self, playing: bool, now: Instant) -> Vec<Action> {
+        self.playing(playing, now);
         self.connect_at = Some(now + self.config.on_connect.delay);
-        self.tick(now)
+        self.due(now)
     }
 
     /// A song from the queue started (not the sound of an event).
-    pub fn song_started(&mut self, now: Instant) -> Vec<Action> {
+    pub fn song_started(&mut self, playing: bool, now: Instant) -> Vec<Action> {
+        self.playing(playing, now);
         self.song_at = Some(now + self.config.on_song_start.delay);
-        self.tick(now)
+        self.due(now)
     }
 
-    /// The bot reports whether music plays, after every change it handled.
+    /// Whether music plays. The bot calls it after every turn, so the deadlines follow
+    /// music that started or stopped, and the calls that can fire an event start with it.
     pub fn playing(&mut self, playing: bool, now: Instant) {
         if playing == self.playing {
             return;
@@ -218,7 +226,13 @@ impl Events {
     }
 
     /// The actions whose time has come.
-    pub fn tick(&mut self, now: Instant) -> Vec<Action> {
+    pub fn tick(&mut self, playing: bool, now: Instant) -> Vec<Action> {
+        self.playing(playing, now);
+        self.due(now)
+    }
+
+    /// The actions whose time has come, with `playing` already up to date.
+    fn due(&mut self, now: Instant) -> Vec<Action> {
         let mut actions = Vec::new();
         // These two do not depend on the channel.
         if self.connect_at.is_some_and(|at| at <= now) {

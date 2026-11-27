@@ -136,7 +136,7 @@ impl Bot {
                 // A disabled branch still builds its future, so `unwrap` would panic without
                 // a deadline. The placeholder is never awaited.
                 _ = sleep_until(deadline.unwrap_or_else(Instant::now)), if deadline.is_some() => {
-                    let actions = self.events.tick(Instant::now());
+                    let actions = self.events.tick(self.player.is_playing(), Instant::now());
                     self.run_actions(actions);
                 }
             }
@@ -178,7 +178,9 @@ impl Bot {
     /// The bot moved, or someone came to or left its channel. `None` while reconnecting.
     fn channel_changed(&mut self, current: Option<CurrentChannel>) {
         if let Some(current) = current {
-            let actions = self.events.channel(current, Instant::now());
+            let actions = self
+                .events
+                .channel(current, self.player.is_playing(), Instant::now());
             self.run_actions(actions);
         }
     }
@@ -190,7 +192,9 @@ impl Bot {
             let current = *self.teamspeak_state.channel.borrow_and_update();
             self.channel_changed(current);
         }
-        let actions = self.events.connected(Instant::now());
+        let actions = self
+            .events
+            .connected(self.player.is_playing(), Instant::now());
         self.run_actions(actions);
     }
 
@@ -223,7 +227,11 @@ impl Bot {
                         self.say(ReplyTo::Channel, text);
                     }
                     Notice::SongStarted => {
-                        let actions = self.events.song_started(Instant::now());
+                        // The song plays already: a timer due now must not see the
+                        // silence before it, or `on_idle` would end it at once.
+                        let actions = self
+                            .events
+                            .song_started(self.player.is_playing(), Instant::now());
                         self.run_actions(actions);
                     }
                     Notice::SoundEnded => self.sound_ended(),

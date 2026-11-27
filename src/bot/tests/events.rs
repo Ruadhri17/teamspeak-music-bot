@@ -397,7 +397,7 @@ async fn a_finished_leaving_event_lets_the_bot_welcome_people_again() {
         others: 0,
     });
     let later = tokio::time::Instant::now() + Duration::from_secs(61);
-    let actions = h.bot.events.tick(later);
+    let actions = h.bot.events.tick(h.bot.player.is_playing(), later);
     assert_eq!(actions, [alone()]);
     h.bot.run_actions(actions);
     assert_eq!(h.outbox(), on_channel("anyone there?"));
@@ -501,7 +501,7 @@ async fn song_start_is_skipped_when_the_song_is_gone() {
     h.add(&["a.mp3"]).await;
     h.send("!queue clear");
     let later = tokio::time::Instant::now() + Duration::from_secs(6);
-    let actions = h.bot.events.tick(later);
+    let actions = h.bot.events.tick(h.bot.player.is_playing(), later);
     assert_eq!(actions, [Action::Run(Trigger::SongStart)]);
     h.bot.run_actions(actions);
     assert!(h.teamspeak_requests().is_empty());
@@ -642,4 +642,31 @@ async fn without_set_volume_events_leave_the_volume_alone() {
     h.run(&[alone()]);
     h.sound_heard();
     assert_eq!(h.control().volume, percent(90));
+}
+
+fn home_channel() -> CurrentChannel {
+    CurrentChannel {
+        id: 1,
+        at_home: true,
+        others: 0,
+    }
+}
+
+fn room_with_people(id: u64) -> CurrentChannel {
+    CurrentChannel {
+        id,
+        at_home: false,
+        others: 1,
+    }
+}
+
+#[tokio::test]
+async fn a_song_that_starts_when_the_idle_time_is_up_keeps_playing() {
+    let mut h = Harness::new();
+    let past = tokio::time::Instant::now() - Duration::from_secs(10 * 60 + 1);
+    h.bot.events.channel(home_channel(), false, past);
+    h.bot.events.channel(room_with_people(2), false, past);
+    h.add(&["a.mp3"]).await;
+    assert_eq!(h.playing(), Some("a"));
+    assert!(h.teamspeak_requests().is_empty());
 }

@@ -43,6 +43,7 @@ fn room(id: u64, others: usize) -> CurrentChannel {
 struct Clock {
     start: Instant,
     events: Events,
+    playing: bool,
 }
 
 impl Clock {
@@ -53,8 +54,12 @@ impl Clock {
     fn with(config: EventsConfig) -> Self {
         let start = Instant::now();
         let mut events = Events::new(&config, start);
-        assert_eq!(events.channel(home(0), start), []);
-        Self { start, events }
+        assert_eq!(events.channel(home(0), false, start), []);
+        Self {
+            start,
+            events,
+            playing: false,
+        }
     }
 
     fn in_room(others: usize) -> Self {
@@ -78,17 +83,18 @@ impl Clock {
 
     fn channel(&mut self, seconds: u64, channel: CurrentChannel) -> Vec<Action> {
         let now = self.at(seconds);
-        self.events.channel(channel, now)
+        self.events.channel(channel, self.playing, now)
     }
 
     fn playing(&mut self, seconds: u64, playing: bool) {
         let now = self.at(seconds);
+        self.playing = playing;
         self.events.playing(playing, now);
     }
 
     fn tick(&mut self, seconds: u64) -> Vec<Action> {
         let now = self.at(seconds);
-        self.events.tick(now)
+        self.events.tick(self.playing, now)
     }
 
     fn deadline(&self) -> Option<u64> {
@@ -103,7 +109,7 @@ fn nothing_happens_before_the_channel_is_known() {
     let start = Instant::now();
     let mut events = Events::new(&config(), start);
     assert_eq!(events.next_deadline(), None);
-    assert_eq!(events.tick(start + secs(3600)), []);
+    assert_eq!(events.tick(false, start + secs(3600)), []);
 }
 
 #[test]
@@ -128,14 +134,17 @@ fn party_waits_for_its_delay() {
     config.on_party.delay = secs(3);
     let start = Instant::now();
     let mut events = Events::new(&config, start);
-    events.channel(home(0), start);
+    events.channel(home(0), false, start);
     assert_eq!(
-        events.channel(room(ROOM, 1), start),
+        events.channel(room(ROOM, 1), false, start),
         [Action::Moved { home: false }]
     );
     assert_eq!(events.next_deadline(), Some(start + secs(3)));
-    assert_eq!(events.tick(start + secs(3)), [Action::Run(Trigger::Party)]);
-    assert_eq!(events.tick(start + secs(4)), []);
+    assert_eq!(
+        events.tick(false, start + secs(3)),
+        [Action::Run(Trigger::Party)]
+    );
+    assert_eq!(events.tick(false, start + secs(4)), []);
 }
 
 #[test]
@@ -144,10 +153,10 @@ fn party_is_skipped_when_everyone_leaves_first() {
     config.on_party.delay = secs(3);
     let start = Instant::now();
     let mut events = Events::new(&config, start);
-    events.channel(home(0), start);
-    events.channel(room(ROOM, 1), start);
-    assert_eq!(events.channel(room(ROOM, 0), start + secs(1)), []);
-    assert_eq!(events.tick(start + secs(3)), []);
+    events.channel(home(0), false, start);
+    events.channel(room(ROOM, 1), false, start);
+    assert_eq!(events.channel(room(ROOM, 0), false, start + secs(1)), []);
+    assert_eq!(events.tick(false, start + secs(3)), []);
 }
 
 #[test]
@@ -183,37 +192,40 @@ fn with_party_delay() -> (Events, Instant) {
     config.on_party.delay = secs(10);
     let start = Instant::now();
     let mut events = Events::new(&config, start);
-    events.channel(home(0), start);
+    events.channel(home(0), false, start);
     (events, start)
 }
 
 #[test]
 fn a_welcome_due_elsewhere_does_not_run_at_home() {
     let (mut events, start) = with_party_delay();
-    events.channel(room(ROOM, 2), start);
+    events.channel(room(ROOM, 2), false, start);
     assert_eq!(
-        events.channel(home(1), start + secs(1)),
+        events.channel(home(1), false, start + secs(1)),
         [Action::Moved { home: true }]
     );
-    assert_eq!(events.tick(start + secs(10)), []);
-    assert_eq!(events.tick(start + secs(20)), []);
+    assert_eq!(events.tick(false, start + secs(10)), []);
+    assert_eq!(events.tick(false, start + secs(20)), []);
 }
 
 #[test]
 fn a_welcome_due_in_the_old_channel_starts_over_in_the_new_one() {
     let (mut events, start) = with_party_delay();
-    events.channel(room(ROOM, 2), start);
-    events.channel(room(OTHER, 1), start + secs(5));
-    assert_eq!(events.tick(start + secs(10)), []);
-    assert_eq!(events.tick(start + secs(15)), [Action::Run(Trigger::Party)]);
+    events.channel(room(ROOM, 2), false, start);
+    events.channel(room(OTHER, 1), false, start + secs(5));
+    assert_eq!(events.tick(false, start + secs(10)), []);
+    assert_eq!(
+        events.tick(false, start + secs(15)),
+        [Action::Run(Trigger::Party)]
+    );
 }
 
 #[test]
 fn a_move_to_an_empty_channel_cancels_the_welcome() {
     let (mut events, start) = with_party_delay();
-    events.channel(room(ROOM, 2), start);
-    events.channel(room(OTHER, 0), start + secs(1));
-    assert_eq!(events.tick(start + secs(10)), []);
+    events.channel(room(ROOM, 2), false, start);
+    events.channel(room(OTHER, 0), false, start + secs(1));
+    assert_eq!(events.tick(false, start + secs(10)), []);
 }
 
 #[test]
@@ -286,9 +298,12 @@ fn both_due_at_once_run_one_event() {
     config.on_idle.delay = secs(60);
     let start = Instant::now();
     let mut events = Events::new(&config, start);
-    events.channel(home(0), start);
-    events.channel(room(ROOM, 0), start);
-    assert_eq!(events.tick(start + secs(60)), [Action::Run(Trigger::Alone)]);
+    events.channel(home(0), false, start);
+    events.channel(room(ROOM, 0), false, start);
+    assert_eq!(
+        events.tick(false, start + secs(60)),
+        [Action::Run(Trigger::Alone)]
+    );
 }
 
 #[test]
@@ -426,11 +441,11 @@ fn connect_runs_after_its_delay_and_again_after_a_reconnect() {
     let mut config = config();
     config.on_connect.delay = secs(5);
     let mut clock = Clock::with(config);
-    assert_eq!(clock.events.connected(clock.at(0)), []);
+    assert_eq!(clock.events.connected(false, clock.at(0)), []);
     assert_eq!(clock.deadline(), Some(5));
     assert_eq!(clock.tick(5), [Action::Run(Trigger::Connect)]);
     assert_eq!(clock.tick(6), []);
-    assert_eq!(clock.events.connected(clock.at(100)), []);
+    assert_eq!(clock.events.connected(false, clock.at(100)), []);
     assert_eq!(clock.tick(105), [Action::Run(Trigger::Connect)]);
 }
 
@@ -438,7 +453,10 @@ fn connect_runs_after_its_delay_and_again_after_a_reconnect() {
 fn connect_does_not_wait_for_the_channel() {
     let start = Instant::now();
     let mut events = Events::new(&config(), start);
-    assert_eq!(events.connected(start), [Action::Run(Trigger::Connect)]);
+    assert_eq!(
+        events.connected(false, start),
+        [Action::Run(Trigger::Connect)]
+    );
 }
 
 #[test]
@@ -446,7 +464,7 @@ fn song_start_without_a_delay_runs_at_once() {
     let mut clock = Clock::in_room(1);
     let now = clock.at(10);
     assert_eq!(
-        clock.events.song_started(now),
+        clock.events.song_started(true, now),
         [Action::Run(Trigger::SongStart)]
     );
 }
@@ -456,8 +474,8 @@ fn a_newer_song_replaces_the_waiting_song_start() {
     let mut config = config();
     config.on_song_start.delay = secs(5);
     let mut clock = Clock::in_room_with(config, 1);
-    assert_eq!(clock.events.song_started(clock.at(10)), []);
-    assert_eq!(clock.events.song_started(clock.at(12)), []);
+    assert_eq!(clock.events.song_started(true, clock.at(10)), []);
+    assert_eq!(clock.events.song_started(true, clock.at(12)), []);
     assert_eq!(clock.deadline(), Some(17));
     assert_eq!(clock.tick(15), []);
     assert_eq!(clock.tick(17), [Action::Run(Trigger::SongStart)]);
