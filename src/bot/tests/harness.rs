@@ -12,7 +12,7 @@ use crate::{
     player::{Ended, Launcher, PlaybackId},
     process::Stopper,
     teamspeak::{
-        self, AudioControl, Author, CurrentChannel, ReplyTo, StateTx, TeamspeakEvent,
+        AudioControl, Author, ClientEvent, CurrentChannel, ReplyTo, TeamspeakEvent,
         TeamspeakRequest,
     },
 };
@@ -36,7 +36,7 @@ pub struct Harness {
     pub scripts: Option<TempDir>,
     control: watch::Receiver<AudioControl>,
     _teamspeak_events: mpsc::Sender<TeamspeakEvent>,
-    _teamspeak_state: StateTx,
+    _client_events: mpsc::UnboundedSender<ClientEvent>,
     _teamspeak_requests: mpsc::Receiver<TeamspeakRequest>,
 }
 
@@ -94,12 +94,12 @@ impl Harness {
         edit(&mut config, dir.path());
 
         let (events_tx, events_rx) = mpsc::channel(8);
-        let (state_tx, state_rx) = teamspeak::state();
+        let (client_events_tx, client_events_rx) = mpsc::unbounded_channel();
         let (requests_tx, requests_rx) = mpsc::channel(8);
         let (control_tx, control_rx) = watch::channel(AudioControl::default());
         let bot = Bot::new(
             events_rx,
-            state_rx,
+            client_events_rx,
             requests_tx,
             control_tx,
             Box::new(FakeLauncher),
@@ -112,7 +112,7 @@ impl Harness {
             scripts: None,
             control: control_rx,
             _teamspeak_events: events_tx,
-            _teamspeak_state: state_tx,
+            _client_events: client_events_tx,
             _teamspeak_requests: requests_rx,
         }
     }
@@ -123,12 +123,12 @@ impl Harness {
     }
 
     pub fn channel(&mut self, current: CurrentChannel) {
-        self.bot.channel_changed(Some(current));
+        self.bot.client_event(ClientEvent::Channel(current));
         self.bot.end_turn();
     }
 
     pub fn connected(&mut self) {
-        self.bot.connected();
+        self.bot.client_event(ClientEvent::Connected);
         self.bot.end_turn();
     }
 
@@ -237,7 +237,7 @@ impl Harness {
     }
 
     pub fn played(&mut self, id: PlaybackId) {
-        self.bot.heard(id.0);
+        self.bot.client_event(ClientEvent::Heard(id.0));
         self.bot.end_turn();
     }
 

@@ -25,7 +25,9 @@ use crate::{
     events::{Events, Trigger},
     player::{Ended, Launcher, Notice, Player},
     sources::{Found, TrackRef},
-    teamspeak::{AudioControl, CurrentChannel, ReplyTo, StateRx, TeamspeakEvent, TeamspeakRequest},
+    teamspeak::{
+        AudioControl, ClientEvent, CurrentChannel, ReplyTo, TeamspeakEvent, TeamspeakRequest,
+    },
 };
 use actions::SoundLookup;
 use lookups::Pending;
@@ -54,8 +56,8 @@ pub struct Bot {
     lookup_slots: Arc<Semaphore>,
     /// From the client: chat messages with commands.
     teamspeak_events: mpsc::Receiver<TeamspeakEvent>,
-    /// From the client: the bot's channel, connecting and the heard streams, as values.
-    teamspeak_state: StateRx,
+    /// From the client: the bot's channel, connecting and the heard streams, in order.
+    client_events: mpsc::UnboundedReceiver<ClientEvent>,
     /// To the client: chat messages, moving the bot and the like.
     teamspeak_requests: mpsc::Sender<TeamspeakRequest>,
     /// Requests collected while one event is handled, sent in order after it.
@@ -76,7 +78,7 @@ pub struct Bot {
 impl Bot {
     pub fn new(
         teamspeak_events: mpsc::Receiver<TeamspeakEvent>,
-        teamspeak_state: StateRx,
+        client_events: mpsc::UnboundedReceiver<ClientEvent>,
         teamspeak_requests: mpsc::Sender<TeamspeakRequest>,
         control: watch::Sender<AudioControl>,
         launcher: Box<dyn Launcher>,
@@ -93,7 +95,7 @@ impl Bot {
             pending: VecDeque::new(),
             lookup_slots: Arc::new(Semaphore::new(config.sources.max_parallel_lookups.get())),
             teamspeak_events,
-            teamspeak_state,
+            client_events,
             teamspeak_requests,
             outbox: Vec::new(),
             sources,
@@ -117,19 +119,8 @@ impl Bot {
                     Some(event) => self.handle_event(event),
                     None => break,
                 },
-                // `changed` marks the value as seen, `borrow` then reads it. `Err` means the
-                // client is gone, the events branch ends the loop then.
-                Ok(()) = self.teamspeak_state.channel.changed() => {
-                    let current = *self.teamspeak_state.channel.borrow();
-                    self.channel_changed(current);
-                }
-                Ok(()) = self.teamspeak_state.connects.changed() => self.connected(),
-                Ok(()) = self.teamspeak_state.heard.changed() => {
-                    let heard = *self.teamspeak_state.heard.borrow();
-                    if let Some(stream) = heard {
-                        self.heard(stream);
-                    }
-                }
+                // `None` means the client is gone, the events branch ends the loop then.
+                Some(event) = self.client_events.recv() => self.client_event(event),
                 ended = self.player.ended() => self.finished(ended),
                 Some(joined) = self.lookups.join_next_with_id() => self.lookup_done(joined),
                 Some(joined) = self.sound_lookups.join_next() => self.sound_found(joined),
@@ -196,23 +187,25 @@ impl Bot {
         }
     }
 
-    /// The bot moved, or someone came to or left its channel. `None` while reconnecting.
-    fn channel_changed(&mut self, current: Option<CurrentChannel>) {
-        if let Some(current) = current {
-            let actions = self
-                .events
-                .channel(current, self.player.is_playing(), Instant::now());
-            self.run_actions(actions);
+    /// The client's channel, connecting and heard streams, in the order they happened.
+    fn client_event(&mut self, event: ClientEvent) {
+        match event {
+            ClientEvent::Channel(current) => self.channel_changed(current),
+            ClientEvent::Connected => self.connected(),
+            ClientEvent::Heard(stream) => self.heard(stream),
         }
     }
 
-    /// The client finished connecting. A channel that changed meanwhile goes first, the
-    /// client learned it first: `on_connect` acts in the channel the bot is in.
+    /// The bot moved, or someone came to or left its channel.
+    fn channel_changed(&mut self, current: CurrentChannel) {
+        let actions = self
+            .events
+            .channel(current, self.player.is_playing(), Instant::now());
+        self.run_actions(actions);
+    }
+
+    /// The client finished connecting.
     fn connected(&mut self) {
-        if self.teamspeak_state.channel.has_changed().unwrap_or(false) {
-            let current = *self.teamspeak_state.channel.borrow_and_update();
-            self.channel_changed(current);
-        }
         let actions = self
             .events
             .connected(self.player.is_playing(), Instant::now());
