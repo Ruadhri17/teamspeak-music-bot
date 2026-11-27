@@ -748,3 +748,27 @@ async fn a_move_before_the_end_of_the_goodbye_drops_the_goodbye() {
     h.played(goodbye);
     assert!(!h.teamspeak_requests().contains(&GO_HOME));
 }
+
+#[tokio::test]
+async fn songs_do_not_start_by_themselves_after_a_goodbye() {
+    let mut h = with_sounds();
+    h.channel(home_channel());
+    h.channel(room_with_people(2));
+    h.add(&["a.mp3", "b.mp3"]).await;
+    h.run(&[alone()]);
+    assert_eq!(h.sound(), Some("bye.wav"));
+    h.teamspeak_requests();
+    h.sound_heard();
+    assert_eq!(h.teamspeak_requests(), [GO_HOME]);
+    assert_eq!(h.playing(), None);
+    assert_eq!(h.queued(), ["a", "b"]);
+}
+
+#[tokio::test]
+async fn a_goodbye_during_the_welcome_leaves_the_songs_alone() {
+    let mut h = with_welcomes(false);
+    welcome_with_a_song_waiting(&mut h).await;
+    h.run(&[alone()]);
+    h.sound_heard();
+    assert_eq!(h.playing(), None);
+}

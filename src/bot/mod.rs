@@ -48,6 +48,10 @@ pub struct Bot {
     sound_lookups: JoinSet<SoundLookup>,
     /// The event whose sound plays now, its remaining actions wait for the end.
     waiting: Option<Trigger>,
+    /// The songs in the queue wait for the sound of a welcome or `on_connect` and start
+    /// when it is over, also when a move cuts it short. A goodbye clears it: after a
+    /// goodbye nothing starts by itself, the bot is on its way out.
+    queue_waits_for_welcome: bool,
     /// Lookups started by `!song add`, matched to `pending` by task ID.
     lookups: JoinSet<Result<Found, String>>,
     /// The lookups in the order of the commands, a finished one waits for those before it.
@@ -91,6 +95,7 @@ impl Bot {
             sounds: HashMap::new(),
             sound_lookups: JoinSet::new(),
             waiting: None,
+            queue_waits_for_welcome: false,
             lookups: JoinSet::new(),
             pending: VecDeque::new(),
             lookup_slots: Arc::new(Semaphore::new(config.sources.max_parallel_lookups.get())),
@@ -144,13 +149,16 @@ impl Bot {
             .playing(self.player.is_playing(), Instant::now());
     }
 
-    /// The one place that starts songs that waited: for the sound of an event, which ended,
-    /// or was cut short by a move. Nothing plays (a sound of an event playing is not idle
-    /// either), nothing holds a pause, no event waits for its sound, and the queue has
-    /// songs. A new welcome in the same turn plays first, the songs wait for it. Only
+    /// The one place that starts the songs that waited for a welcome, once it is over:
+    /// it ended, or a move cut it short. A new welcome in the same turn plays first, the
+    /// songs wait for it. Starting follows `Player::can_start`, so a pause holds. Only
     /// ending a goodbye starts songs elsewhere, see `end_goodbye`.
     fn start_waiting_songs(&mut self) {
-        if self.waiting.is_none() && self.player.can_start() && !self.player.queue_is_empty() {
+        if self.waiting.is_some() || !self.queue_waits_for_welcome {
+            return;
+        }
+        self.queue_waits_for_welcome = false;
+        if self.player.can_start() && !self.player.queue_is_empty() {
             self.player.start_queue();
             self.report();
         }
