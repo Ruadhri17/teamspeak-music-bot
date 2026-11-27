@@ -9,9 +9,11 @@
 //! - `mod.rs`: the questions and the order of the steps
 //! - `plan`: what to install and how, the files setup writes, without I/O
 //! - `system`: running the steps
+//! - `update`: `tsmusic update`, a new release that runs its own setup
 
 mod plan;
 mod system;
+pub mod update;
 
 use std::{
     fmt::Display,

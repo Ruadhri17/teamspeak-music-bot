@@ -127,3 +127,84 @@ fn unit_runs_the_bot_as_its_own_user() {
     assert!(unit.contains("\nStateDirectory=tsmusic\n"));
     assert!(unit.contains("\nWantedBy=multi-user.target\n"));
 }
+
+fn version(text: &str) -> Version {
+    Version::parse(text).unwrap()
+}
+
+#[test]
+fn versions_compare_by_their_numbers() {
+    assert!(version("0.2.0") < version("0.3.0"));
+    assert!(version("0.9.0") < version("0.10.0"));
+    assert!(version("1.0.0") > version("0.99.99"));
+    assert_eq!(version("0.2.0"), version("0.2.0"));
+}
+
+#[test]
+fn a_pre_release_comes_before_its_release() {
+    assert!(version("0.3.0-rc.1") < version("0.3.0"));
+    assert!(version("0.3.0-rc.1") < version("0.3.0-rc.2"));
+    assert!(version("0.3.0-rc.1") > version("0.2.9"));
+}
+
+#[test]
+fn only_versions_parse() {
+    for text in [
+        "",
+        "0.3",
+        "0.3.0.1",
+        "v0.3.0",
+        "0.3.x",
+        "0.3.0-",
+        "0..3",
+        "0.3.0-rc/1",
+        " 0.3.0",
+    ] {
+        assert_eq!(Version::parse(text), None, "{text:?}");
+    }
+}
+
+#[test]
+fn the_tag_comes_from_the_release_page() {
+    assert_eq!(
+        tag_from_release_url(
+            "https://github.com/Ruadhri17/teamspeak-music-bot/releases/tag/v0.2.0\n"
+        ),
+        Some("v0.2.0")
+    );
+    assert_eq!(
+        tag_from_release_url("https://github.com/Ruadhri17/teamspeak-music-bot/releases"),
+        None
+    );
+    assert_eq!(
+        tag_from_release_url("https://github.com/x/y/releases/tag/v0.2.0/../../evil"),
+        None
+    );
+}
+
+#[test]
+fn the_version_option_becomes_a_tag() {
+    assert_eq!(release_tag("0.3.0").as_deref(), Some("v0.3.0"));
+    assert_eq!(release_tag("v0.3.0-rc.1").as_deref(), Some("v0.3.0-rc.1"));
+    assert_eq!(release_tag("0.3.0/../../x"), None);
+    assert_eq!(release_tag("latest"), None);
+}
+
+#[test]
+fn the_bot_comes_from_the_release_of_its_tag() {
+    let download = bot_download("v0.3.0", "x86_64").unwrap();
+    assert_eq!(
+        download.url,
+        "https://github.com/Ruadhri17/teamspeak-music-bot/releases/download/v0.3.0/tsmusic-x86_64-unknown-linux-gnu"
+    );
+    assert_eq!(
+        download.sums_url,
+        "https://github.com/Ruadhri17/teamspeak-music-bot/releases/download/v0.3.0/SHA256SUMS"
+    );
+    assert_eq!(download.file, "tsmusic-x86_64-unknown-linux-gnu");
+    assert_eq!(
+        bot_download("v0.3.0", "aarch64").unwrap().file,
+        "tsmusic-aarch64-unknown-linux-gnu"
+    );
+    assert_eq!(bot_download("v0.3.0", "riscv64"), None);
+}

@@ -1,5 +1,6 @@
-//! Entry point: CLI (`init`, `run`, `yt-check`), loading config and secrets,
-//! starting the two tasks (the TeamSpeak client and the bot) and wiring them with channels.
+//! Entry point: CLI (`init`, `run`, `yt-check`, `check-config`, `setup`, `update`), loading
+//! config and secrets, starting the two tasks (the TeamSpeak client and the bot) and wiring
+//! them with channels.
 
 mod audio;
 mod bot;
@@ -47,6 +48,7 @@ async fn main() -> anyhow::Result<()> {
     match cli.command {
         Command::Init { force } => cli::init(&location, force),
         Command::Run => run(&location, cli.log_level).await,
+        Command::CheckConfig => cli::check_config(&location),
         Command::YtCheck { query, full } => {
             cli::yt_check::run(&location, cli.log_level, &query.join(" "), full).await
         }
@@ -61,6 +63,9 @@ async fn main() -> anyhow::Result<()> {
             dry_run,
             tools_only,
         }),
+        Command::Update { version, force } => {
+            cli::setup::update::run(cli::setup::update::Options { version, force })
+        }
     }
 }
 

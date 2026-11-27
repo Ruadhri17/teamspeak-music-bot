@@ -3,7 +3,7 @@
 //!
 //! - `mod.rs`: `Cli`, `Command` and `init`
 //! - `yt_check`: `tsmusic yt-check`
-//! - `setup`: `tsmusic setup`, installing the bot as a service
+//! - `setup`: `tsmusic setup`, installing the bot as a service, and `tsmusic update`
 //!
 //! `run` starts the bot itself and stays in `main.rs`.
 
@@ -43,6 +43,10 @@ pub enum Command {
     /// Connect to the server and start the bot.
     Run,
 
+    /// Check the config file without starting the bot.
+    #[command(name = "check-config")]
+    CheckConfig,
+
     /// Check YouTube playback on this machine, without TeamSpeak.
     #[command(name = "yt-check")]
     YtCheck {
@@ -73,6 +77,25 @@ pub enum Command {
         #[arg(long)]
         tools_only: bool,
     },
+
+    /// Update the service to the latest release, with its programs. Run as root.
+    Update {
+        /// Install this release instead of the latest, e.g. 0.3.0.
+        #[arg(long)]
+        version: Option<String>,
+
+        /// Install the release even when it is the running version.
+        #[arg(long)]
+        force: bool,
+    },
+}
+
+/// `tsmusic check-config`: reads and checks the config like `run`, without connecting.
+/// `tsmusic update` asks the new version this before installing it.
+pub fn check_config(location: &ConfigLocation) -> anyhow::Result<()> {
+    location.load()?;
+    println!("{} is valid", location.file_path().display());
+    Ok(())
 }
 
 /// `tsmusic init`: writes the config template.
@@ -129,5 +152,39 @@ mod tests {
         assert_eq!(query.join(" "), "daft punk");
         assert!(full);
         assert!(Cli::try_parse_from(["tsmusic", "yt-check"]).is_err());
+    }
+
+    #[test]
+    fn update_takes_a_version_and_force() {
+        let cli = Cli::parse_from(["tsmusic", "update", "--version", "0.3.0", "--force"]);
+        let Command::Update { version, force } = cli.command else {
+            panic!("expected update");
+        };
+        assert_eq!(version.as_deref(), Some("0.3.0"));
+        assert!(force);
+        let cli = Cli::parse_from(["tsmusic", "update"]);
+        assert!(matches!(
+            cli.command,
+            Command::Update {
+                version: None,
+                force: false
+            }
+        ));
+    }
+
+    #[test]
+    fn the_version_of_the_bot_is_still_a_top_level_flag() {
+        let err = Cli::try_parse_from(["tsmusic", "--version"]).unwrap_err();
+        assert_eq!(err.kind(), clap::error::ErrorKind::DisplayVersion);
+    }
+
+    #[test]
+    fn an_unknown_subcommand_is_a_usage_error() {
+        let err = Cli::try_parse_from(["tsmusic", "check-everything"]).unwrap_err();
+        assert_eq!(err.exit_code(), 2);
+        assert!(matches!(
+            Cli::parse_from(["tsmusic", "check-config"]).command,
+            Command::CheckConfig
+        ));
     }
 }

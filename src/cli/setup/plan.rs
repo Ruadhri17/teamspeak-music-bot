@@ -97,7 +97,100 @@ pub struct Download {
     pub zipped: bool,
 }
 
-/// The `deno` build for `std::env::consts::ARCH`.
+/// Where the releases of the bot are.
+pub const REPO: &str = "Ruadhri17/teamspeak-music-bot";
+
+/// Redirects to the page of the latest release, `.../releases/tag/<tag>`.
+pub fn latest_release_url() -> String {
+    format!("https://github.com/{REPO}/releases/latest")
+}
+
+/// The tag at the end of the URL `latest_release_url` redirects to.
+pub fn tag_from_release_url(url: &str) -> Option<&str> {
+    let (_, tag) = url.trim_end().rsplit_once("/releases/tag/")?;
+    is_tag(tag).then_some(tag)
+}
+
+/// `--version` as a tag: `0.3.0` and `v0.3.0` both give `v0.3.0`. It goes into a URL, so
+/// only a version is accepted.
+pub fn release_tag(version: &str) -> Option<String> {
+    let tag = format!("v{}", version.strip_prefix('v').unwrap_or(version));
+    is_tag(&tag).then_some(tag)
+}
+
+fn is_tag(tag: &str) -> bool {
+    tag.strip_prefix('v').and_then(Version::parse).is_some()
+}
+
+/// The binary of the release `tag` for `std::env::consts::ARCH`, with the sums of the release.
+pub fn bot_download(tag: &str, arch: &str) -> Option<Download> {
+    let file = format!("tsmusic-{}", deno_target(arch)?);
+    let base = format!("https://github.com/{REPO}/releases/download/{tag}");
+    Some(Download {
+        url: format!("{base}/{file}"),
+        sums_url: format!("{base}/SHA256SUMS"),
+        file,
+        zipped: false,
+    })
+}
+
+/// A version of the bot, `0.3.0` or `0.3.0-rc.1`. Compares like semver, without build
+/// metadata: a pre-release comes before its release.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Version {
+    numbers: [u64; 3],
+    pre: Option<String>,
+}
+
+impl Version {
+    pub fn parse(text: &str) -> Option<Self> {
+        let (release, pre) = match text.split_once('-') {
+            Some((release, pre)) => (release, Some(pre)),
+            None => (text, None),
+        };
+        let valid_pre = pre.is_none_or(|pre| {
+            !pre.is_empty()
+                && pre
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-')
+        });
+        let mut parts = release.split('.');
+        let mut numbers = [0; 3];
+        for number in &mut numbers {
+            let part = parts.next()?;
+            if part.is_empty() || !part.bytes().all(|b| b.is_ascii_digit()) {
+                return None;
+            }
+            *number = part.parse().ok()?;
+        }
+        (parts.next().is_none() && valid_pre).then(|| Self {
+            numbers,
+            pre: pre.map(str::to_owned),
+        })
+    }
+}
+
+impl PartialOrd for Version {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for Version {
+    /// Pre-releases are compared as text, enough for `rc.1` before `rc.2`.
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.numbers
+            .cmp(&other.numbers)
+            .then_with(|| match (&self.pre, &other.pre) {
+                (None, None) => std::cmp::Ordering::Equal,
+                (None, Some(_)) => std::cmp::Ordering::Greater,
+                (Some(_), None) => std::cmp::Ordering::Less,
+                (Some(a), Some(b)) => a.cmp(b),
+            })
+    }
+}
+
+/// The `deno` build for `std::env::consts::ARCH`, also the name of the bot's build.
 pub fn deno_target(arch: &str) -> Option<&'static str> {
     match arch {
         "x86_64" => Some("x86_64-unknown-linux-gnu"),

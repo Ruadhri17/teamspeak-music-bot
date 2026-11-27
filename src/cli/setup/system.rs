@@ -49,6 +49,12 @@ impl Runner {
             self.shown.push(args.join(" "));
             return Ok(());
         }
+        self.output(args).map(drop)
+    }
+
+    /// Runs `args`, waits and returns what it printed. Also in a dry run, only for commands
+    /// that change nothing.
+    pub fn output(&mut self, args: &[&str]) -> anyhow::Result<String> {
         let output = Command::new(args[0])
             .args(&args[1..])
             .env("DEBIAN_FRONTEND", "noninteractive")
@@ -56,7 +62,7 @@ impl Runner {
             .output()
             .with_context(|| format!("cannot start {}", args[0]))?;
         if output.status.success() {
-            return Ok(());
+            return Ok(String::from_utf8_lossy(&output.stdout).into_owned());
         }
         let text = String::from_utf8_lossy(&output.stderr).into_owned()
             + &String::from_utf8_lossy(&output.stdout);
@@ -81,8 +87,8 @@ impl Runner {
         install_file(self, &temp, dest, mode, owner)
     }
 
-    /// Installs `tool` from its GitHub release into `TOOLS_DIR`, after checking its sum.
-    pub fn install_download(&mut self, tool: Tool, download: &Download) -> anyhow::Result<()> {
+    /// Downloads a file from a GitHub release into the work directory and checks its sum.
+    pub fn download(&mut self, download: &Download) -> anyhow::Result<PathBuf> {
         let file = self.work_file(&download.file)?;
         let sums = self.work_file(format!("{}.sums", download.file))?;
         self.fetch(&download.url, &file)?;
@@ -90,6 +96,12 @@ impl Runner {
         if !self.dry_run {
             verify(&file, &sums, &download.file)?;
         }
+        Ok(file)
+    }
+
+    /// Installs `tool` from its GitHub release into `TOOLS_DIR`, after checking its sum.
+    pub fn install_download(&mut self, tool: Tool, download: &Download) -> anyhow::Result<()> {
+        let file = self.download(download)?;
         let program = if download.zipped {
             let dir = self.work_file(format!("{}-unzipped", tool.name()))?;
             let (zip, dir_text) = (file.display().to_string(), dir.display().to_string());
