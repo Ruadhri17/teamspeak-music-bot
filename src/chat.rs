@@ -26,10 +26,38 @@ pub fn shorten(text: &str, max_chars: usize) -> Cow<'_, str> {
     Cow::Owned(format!("{}{MORE}", kept.trim_end()))
 }
 
+/// `text` escaped (see `escape`) and cut so it has at most `max_chars` characters and
+/// takes at most `max_bytes` bytes, escaping included. A cut ends in `MORE`, which counts
+/// toward both limits. A character is never split, a cut may leave less than `max_bytes`.
+pub fn fit(text: &str, max_chars: usize, max_bytes: usize) -> String {
+    let escaped = escape(text);
+    if text.chars().count() <= max_chars && escaped.len() <= max_bytes {
+        return escaped.into_owned();
+    }
+    let room = max_bytes.saturating_sub(MORE.len());
+    let mut chars = text.char_indices().peekable();
+    let (mut end, mut bytes) = (0, 0);
+    for _ in 0..max_chars.saturating_sub(1) {
+        let Some((at, c)) = chars.next() else { break };
+        // What `escape` makes of it, counted high for a backslash whose bracket is cut off.
+        let size = match c {
+            '[' | ']' => 2,
+            '\\' if matches!(chars.peek(), Some((_, '[' | ']'))) => 1 + ZERO_WIDTH_SPACE.len_utf8(),
+            _ => c.len_utf8(),
+        };
+        if bytes + size > room {
+            break;
+        }
+        bytes += size;
+        end = at + c.len_utf8();
+    }
+    format!("{}{MORE}", escape(text[..end].trim_end()))
+}
+
 /// Joins `lines` into one message of at most `MAX_MESSAGE_LEN` bytes, with `tail` always
 /// as its last line. Lines that do not fit are left out from the end and `MORE` stands for them.
 pub fn message(lines: impl IntoIterator<Item = String>, tail: Option<String>) -> String {
-    let reserve = tail.as_ref().map_or(0, |tail| tail.len() + 1) + MORE.len() + 1;
+    let reserve = reserve(tail.as_deref());
     let mut text = String::new();
     let mut cut = false;
     for line in lines {
@@ -50,6 +78,17 @@ pub fn message(lines: impl IntoIterator<Item = String>, tail: Option<String>) ->
         text.push_str(&last);
     }
     text
+}
+
+/// The bytes each of `lines` lines may take so that `message` keeps them all, with `tail`
+/// as its last line. Zero when even that is too much, the lines are then left out.
+pub fn line_budget(lines: usize, tail: Option<&str>) -> usize {
+    (MAX_MESSAGE_LEN.saturating_sub(reserve(tail)) / lines.max(1)).saturating_sub(1)
+}
+
+/// What `message` keeps free for `tail` and for `MORE`, each on its own line.
+fn reserve(tail: Option<&str>) -> usize {
+    tail.map_or(0, |tail| tail.len() + 1) + MORE.len() + 1
 }
 
 /// Makes `[` and `]` plain text by putting `\` before them, checked by hand in TS3 and TS6:
@@ -96,6 +135,38 @@ mod tests {
         assert_eq!(shorten("Dancing Queen", 8), "Dancing…");
         assert_eq!(shorten("Zażółć gęślą jaźń", 6), "Zażół…");
         assert_eq!(shorten("ab cd", 4), "ab…");
+    }
+
+    #[test]
+    fn fit_keeps_text_within_both_limits() {
+        assert_eq!(fit("Waterloo", 50, 100), "Waterloo");
+        assert_eq!(fit("Dancing Queen", 8, 100), "Dancing…");
+        assert_eq!(fit("Dancing Queen", 50, 10), "Dancing…");
+        assert_eq!(fit("한국어 노래 제목", 50, 13), "한국어…");
+        let fitted = fit(&"가".repeat(50), 50, 60);
+        assert!(fitted.len() <= 60, "{}", fitted.len());
+        assert!(fitted.ends_with(MORE));
+    }
+
+    #[test]
+    fn fit_counts_the_escaping() {
+        assert_eq!(fit("[b]x", 50, 7), "\\[b\\]x");
+        assert_eq!(fit("[b]xyz", 50, 8), "\\[b\\]xyz");
+        assert_eq!(fit("[b]xyz", 50, 7), "\\[b…");
+        let fitted = fit(&"[]".repeat(40), 50, 30);
+        assert!(fitted.len() <= 30, "{}", fitted.len());
+        assert!(!fitted.trim_end_matches(MORE).ends_with('\\'));
+    }
+
+    #[test]
+    fn fit_never_splits_a_character() {
+        for max_bytes in 0..20 {
+            let fitted = fit("ż🎵ż🎵ż🎵ż🎵ż", 50, max_bytes);
+            assert!(
+                fitted.len() <= max_bytes.max(MORE.len()),
+                "{max_bytes}: {fitted}"
+            );
+        }
     }
 
     #[test]

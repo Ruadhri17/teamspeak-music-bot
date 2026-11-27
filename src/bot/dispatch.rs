@@ -117,32 +117,40 @@ impl Bot {
         }
     }
 
-    /// `!queue show [page]`. Always replies (informational command), in one message:
-    /// titles are cut so a full page fits, lines that still do not fit become an ellipsis.
+    /// `!queue show [page]`. Always replies (informational command), in one message.
+    /// Every line gets an equal share of the message and titles are cut to it, counted in
+    /// bytes: a title in Korean or with emoji takes 3-4 bytes a character, and a page that
+    /// did not fit would hide its last entries, which no other page shows.
     fn queue_show(&self, page: NonZeroUsize) -> String {
         let Some(page) = self.player.queue_page(page, self.page_size) else {
             return "no such page, the queue is shorter".to_string();
         };
-        // Cut before escaping, see `chat::shorten`.
-        let title = |track: &TrackRef| {
-            chat::escape(&chat::shorten(track.display_name(), QUEUE_TITLE_LEN)).into_owned()
+        let current = self.player.current();
+        // Decoding ahead while the end of the current one plays, out of the queue already.
+        let next = self.player.up_next();
+        let footer = (page.count > 1).then(|| format!("page {}/{}", page.number, page.count));
+        let count = usize::from(current.is_some())
+            + usize::from(next.is_some())
+            + page.entries.len().max(1);
+        let share = chat::line_budget(count, footer.as_deref());
+        let line = |prefix: String, track: &TrackRef| {
+            let room = share.saturating_sub(prefix.len());
+            prefix + &chat::fit(track.display_name(), QUEUE_TITLE_LEN, room)
         };
 
         let mut lines = Vec::new();
-        if let Some(current) = self.player.current() {
-            lines.push(format!("Now: {}", title(current.track)));
+        if let Some(current) = current {
+            lines.push(line("Now: ".into(), current.track));
         }
-        // Decoding ahead while the end of the current one plays, out of the queue already.
-        if let Some(next) = self.player.up_next() {
-            lines.push(format!("Next: {}", title(next)));
+        if let Some(next) = next {
+            lines.push(line("Next: ".into(), next));
         }
         if page.entries.is_empty() {
             lines.push("the queue is empty".to_string());
         }
         for (position, track) in &page.entries {
-            lines.push(format!("{position}. {}", title(track)));
+            lines.push(line(format!("{position}. "), track));
         }
-        let footer = (page.count > 1).then(|| format!("page {}/{}", page.number, page.count));
         chat::message(lines, footer)
     }
 

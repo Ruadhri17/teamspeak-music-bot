@@ -1,5 +1,6 @@
 use super::harness::{Harness, author, on_channel, reply};
 use crate::{
+    chat::MAX_MESSAGE_LEN,
     config::Volume,
     permissions::Role,
     teamspeak::{ReplyTo, TeamspeakRequest},
@@ -272,4 +273,72 @@ async fn album_and_playlist_search_say_they_are_not_supported_yet() {
     }
     assert!(h.is_idle());
     assert!(h.bot.lookups.is_empty());
+}
+
+async fn full_page_of(h: &mut Harness, title: impl Fn(usize) -> String) {
+    let names: Vec<String> = (0..16).map(|i| format!("{}.mp3", title(i))).collect();
+    for name in &names {
+        std::fs::write(h.dir.path().join(name), b"audio").unwrap();
+    }
+    let names: Vec<&str> = names.iter().map(String::as_str).collect();
+    h.add(&names).await;
+}
+
+fn assert_whole_page(text: &str) {
+    assert!(text.len() <= MAX_MESSAGE_LEN, "{} bytes", text.len());
+    assert!(text.lines().any(|line| line.starts_with("15. ")), "{text}");
+    assert!(!text.lines().any(|line| line == "…"), "{text}");
+}
+
+#[tokio::test]
+async fn a_page_of_long_korean_titles_shows_every_entry() {
+    let mut h = Harness::new();
+    full_page_of(&mut h, |i| format!("{}{i:02}", "노래".repeat(24))).await;
+    let text = h.send("!queue show").unwrap();
+    assert_whole_page(&text);
+    assert_eq!(
+        h.send("!queue show 2"),
+        reply("no such page, the queue is shorter")
+    );
+}
+
+#[tokio::test]
+async fn a_page_of_emoji_titles_shows_every_entry() {
+    let mut h = Harness::new();
+    full_page_of(&mut h, |i| format!("{}{i:02}", "🎵".repeat(48))).await;
+    assert_whole_page(&h.send("!queue show").unwrap());
+}
+
+#[tokio::test]
+async fn escaped_brackets_count_toward_the_page() {
+    let mut h = Harness::new();
+    full_page_of(&mut h, |i| format!("{}{i:02}", "[b]".repeat(16))).await;
+    let text = h.send("!queue show").unwrap();
+    assert_whole_page(&text);
+    assert!(text.contains("\\[b\\]"), "{text}");
+}
+
+#[tokio::test]
+async fn short_titles_are_not_cut() {
+    let mut h = Harness::new();
+    full_page_of(&mut h, |i| format!("Dancing Queen {i:02}")).await;
+    let text = h.send("!queue show").unwrap();
+    assert_whole_page(&text);
+    assert!(text.contains("15. Dancing Queen 15"), "{text}");
+}
+
+#[tokio::test]
+async fn the_largest_page_of_long_titles_fits() {
+    let mut h = Harness::with_page_size(30);
+    let names: Vec<String> = (0..31)
+        .map(|i| format!("{}{i:02}.mp3", "가".repeat(48)))
+        .collect();
+    for name in &names {
+        std::fs::write(h.dir.path().join(name), b"audio").unwrap();
+    }
+    let names: Vec<&str> = names.iter().map(String::as_str).collect();
+    h.add(&names).await;
+    let text = h.send("!queue show").unwrap();
+    assert!(text.len() <= MAX_MESSAGE_LEN, "{} bytes", text.len());
+    assert!(text.lines().any(|line| line.starts_with("30. ")), "{text}");
 }

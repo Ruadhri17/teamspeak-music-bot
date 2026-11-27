@@ -368,3 +368,12 @@ fn set_volume_above_max_volume_is_rejected() {
         "events.on_song_start.set_volume: must not be greater than audio.max_volume (90 > 80)"
     );
 }
+
+#[test]
+fn show_page_size_is_at_most_thirty() {
+    let mut config = Config::default();
+    config.queue.show_page_size = std::num::NonZeroUsize::new(30).unwrap();
+    assert!(validate(&config).is_ok());
+    config.queue.show_page_size = std::num::NonZeroUsize::new(31).unwrap();
+    assert_eq!(broken_field(&config), "queue.show_page_size");
+}
