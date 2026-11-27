@@ -89,6 +89,18 @@ impl Decoder {
         })
     }
 
+    /// Stops ffmpeg and waits until the thread that feeds it has let go of the input.
+    /// Dropping the decoder does not wait for that, so a program that exits right after
+    /// would leave the input behind (a `yt-dlp` process, its copy of the cookies).
+    /// Stop the input first (`Stopper`), otherwise this waits for its next read.
+    pub fn close(mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+        if let Some(writer) = self.writer.take() {
+            let _ = writer.join();
+        }
+    }
+
     /// The ffmpeg process, for `Stopper::watch`.
     pub fn process(&self) -> &Child {
         &self.child

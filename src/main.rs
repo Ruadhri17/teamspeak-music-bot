@@ -23,6 +23,7 @@ use std::{
     time::Duration,
 };
 
+use anyhow::Context;
 use clap::Parser;
 
 use bot::Bot;
@@ -97,6 +98,16 @@ fn check_dependencies(config: &Config) -> anyhow::Result<Vec<(&'static str, Stri
             origin: "looked up in PATH, needed by yt-dlp".into(),
         },
     ])
+}
+
+/// A configured cookie file must exist and be private to the bot's user, checked at start
+/// like the secrets. The bot reads it again for every run of `yt-dlp` that uses it.
+fn check_cookies(config: &Config) -> anyhow::Result<()> {
+    if let Some(path) = &config.sources.youtube.cookies_file {
+        sources::cookies::check(path).context("sources.youtube.cookies_file")?;
+        info!("YouTube cookies: {}", path.display());
+    }
+    Ok(())
 }
 
 /// The version in the first line of `--version`: the word after `version` when it has a
@@ -184,6 +195,7 @@ async fn run(location: &ConfigLocation, log_level: Option<LogLevel>) -> anyhow::
     }
 
     let secrets = Secrets::load(&config.paths.secrets_file)?;
+    check_cookies(&config)?;
 
     let shutdown = CancellationToken::new();
 

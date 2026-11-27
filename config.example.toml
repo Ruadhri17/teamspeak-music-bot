@@ -98,6 +98,11 @@ yt_dlp_path = "yt-dlp"              # [live]
 # YouTube clients tried first, faster than the yt-dlp defaults.
 # If they fail, yt-dlp retries with its own choice. [] = always let yt-dlp choose.
 player_clients = ["visionos"]       # [live]
+# Cookies of a YouTube account, for when YouTube asks the bot to sign in (common on a VPS)
+# and for age-restricted videos. Used only with the yt-dlp defaults, so on a VPS set
+# player_clients = [] as well. Owned by the bot's user, mode 0600. See docs/youtube.md.
+# Not set = no account.
+# cookies_file = "youtube-cookies.txt"  # [live]
 
 [sources.local]
 # Folder with local files. Paths outside it are blocked.

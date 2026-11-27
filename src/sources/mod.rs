@@ -4,7 +4,9 @@
 //! - TODO: common `Source` interface: resolve a link, search (track/album/playlist), open a stream
 //! - `parse_query`: link or search phrase, links checked against each source allow-list of hosts
 //! - `music_dir`: the folder of the local source, used for lookups and for opening tracks
+//! - `cookies`: the YouTube cookies, a private copy for each `yt-dlp` run
 
+pub mod cookies;
 pub mod local;
 mod soundcloud;
 mod spotify;

@@ -52,6 +52,10 @@ pub fn validate(config: &Config) -> Result<(), ValidationError> {
         "sources.local.music_dir",
         config.sources.local.music_dir.as_deref(),
     )?;
+    optional_path(
+        "sources.youtube.cookies_file",
+        config.sources.youtube.cookies_file.as_deref(),
+    )?;
 
     // `tokio::time::interval` panics on a zero period.
     ensure(

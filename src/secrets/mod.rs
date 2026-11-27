@@ -5,7 +5,7 @@
 //! - `identity`: the TS identity in `state_dir`, created on the first start
 //! - `file`: owner and `0600` checks, atomic writes with restricted permissions
 
-mod file;
+pub mod file;
 pub mod identity;
 
 use std::{

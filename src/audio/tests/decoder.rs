@@ -1,4 +1,13 @@
-use std::{fs::File, path::Path, process::Command};
+use std::{
+    fs::File,
+    io::Read,
+    path::Path,
+    process::Command,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+};
 
 use tempfile::TempDir;
 
@@ -122,4 +131,28 @@ fn m4a_stream_with_index_last_is_an_ffmpeg_error() {
     let mut decoder = Decoder::spawn(Path::new("ffmpeg"), input).unwrap();
     assert_eq!(count_frames(&mut decoder), 0);
     assert!(matches!(decoder.finish(), Err(AudioError::Ffmpeg { .. })));
+}
+
+struct Endless(Arc<AtomicBool>);
+
+impl Read for Endless {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        buf.fill(0);
+        Ok(buf.len())
+    }
+}
+
+impl Drop for Endless {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::SeqCst);
+    }
+}
+
+#[test]
+fn close_returns_once_the_input_is_let_go() {
+    let dropped = Arc::new(AtomicBool::new(false));
+    let input = AudioInput::Stream(Box::new(Endless(dropped.clone())));
+    let decoder = Decoder::spawn(Path::new("ffmpeg"), input).unwrap();
+    decoder.close();
+    assert!(dropped.load(Ordering::SeqCst));
 }

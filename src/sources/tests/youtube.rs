@@ -684,7 +684,7 @@ fn real_open_streams_audio() {
 
 fn open_once(yt_dlp: &Path, clients: Clients) -> Box<dyn Read + Send> {
     let id = "5NV6Rdv1a3I".parse().unwrap();
-    match open_with(&config(yt_dlp), &id, clients).unwrap() {
+    match open_with(&config(yt_dlp), &id, clients, &Stopper::new()).unwrap() {
         AudioInput::Stream(reader) => reader,
         AudioInput::File(_) => panic!("expected a stream"),
     }
@@ -919,4 +919,147 @@ exec sleep 30"#,
     assert!(start.elapsed() < Duration::from_secs(2));
     let runs = fs::read_to_string(dir.path().join("runs")).unwrap();
     assert_eq!(runs.lines().count(), 1, "{runs}");
+}
+
+const COOKIES: &str = "# Netscape HTTP Cookie File\n";
+
+fn cookie_file(dir: &TempDir, mode: u32) -> PathBuf {
+    let path = dir.path().join("youtube-cookies.txt");
+    fs::write(&path, COOKIES).unwrap();
+    fs::set_permissions(&path, fs::Permissions::from_mode(mode)).unwrap();
+    path
+}
+
+fn with_cookies(yt_dlp: &Path, cookies: &Path) -> YoutubeConfig {
+    YoutubeConfig {
+        cookies_file: Some(cookies.to_path_buf()),
+        ..config(yt_dlp)
+    }
+}
+
+fn reading_cookies(body: &str) -> String {
+    logged(&format!(
+        r#"c=; p=; for a; do [ "$p" = --cookies ] && c=$a; p=$a; done
+if [ -n "$c" ]; then echo "$c" >> "$d/copies"; cat "$c" >> "$d/seen"; echo rewritten > "$c"; fi
+{body}"#
+    ))
+}
+
+fn copies(dir: &TempDir) -> Vec<PathBuf> {
+    fs::read_to_string(dir.path().join("copies"))
+        .unwrap_or_default()
+        .lines()
+        .map(PathBuf::from)
+        .collect()
+}
+
+fn video_script() -> String {
+    format!(
+        r#"cat <<'JSON'
+{VIDEO_JSON}
+JSON"#
+    )
+}
+
+#[test]
+fn cookies_go_only_to_runs_with_the_default_clients() {
+    let (dir, path) = fake_yt_dlp(&reading_cookies(
+        r#"[ "$run" -ge 2 ] || exit 1; printf audio"#,
+    ));
+    let cookies = cookie_file(&dir, 0o600);
+    open_config(&with_cookies(&path, &cookies))
+        .read_to_end(&mut Vec::new())
+        .unwrap();
+
+    let runs = runs(&dir);
+    assert_eq!(runs.len(), 2);
+    assert!(!runs[0].contains("--cookies"));
+    assert!(runs[1].contains("--cookies"));
+    assert_eq!(
+        fs::read_to_string(dir.path().join("seen")).unwrap(),
+        COOKIES
+    );
+}
+
+#[tokio::test]
+async fn without_player_clients_the_first_lookup_has_cookies() {
+    let (dir, path) = fake_yt_dlp(&reading_cookies(&video_script()));
+    let cookies = cookie_file(&dir, 0o600);
+    let config = YoutubeConfig {
+        player_clients: Vec::new(),
+        ..with_cookies(&path, &cookies)
+    };
+    let query = QueryType::Phrase("get lucky".to_owned());
+    resolve(&config, &query, LIMIT).await.unwrap();
+    assert!(runs(&dir)[0].contains("--cookies"));
+}
+
+#[tokio::test]
+async fn the_copy_is_removed_after_the_lookup() {
+    let (dir, path) = fake_yt_dlp(&reading_cookies(&video_script()));
+    let cookies = cookie_file(&dir, 0o600);
+    let query = QueryType::Phrase("get lucky".to_owned());
+    resolve_with(
+        &with_cookies(&path, &cookies),
+        &query,
+        LIMIT,
+        Clients::Default,
+    )
+    .await
+    .unwrap();
+
+    let copies = copies(&dir);
+    assert_eq!(copies.len(), 1);
+    assert_ne!(copies[0], cookies);
+    assert!(!copies[0].exists());
+    assert_eq!(fs::read_to_string(&cookies).unwrap(), COOKIES);
+}
+
+#[test]
+fn the_copy_is_removed_after_the_stream() {
+    let (dir, path) = fake_yt_dlp(&reading_cookies("printf audio"));
+    let cookies = cookie_file(&dir, 0o600);
+    let id = "5NV6Rdv1a3I".parse().unwrap();
+    let AudioInput::Stream(mut reader) = open_with(
+        &with_cookies(&path, &cookies),
+        &id,
+        Clients::Default,
+        &Stopper::new(),
+    )
+    .unwrap() else {
+        panic!("expected a stream");
+    };
+    reader.read_to_end(&mut Vec::new()).unwrap();
+    drop(reader);
+
+    let copies = copies(&dir);
+    assert_eq!(copies.len(), 1);
+    assert!(!copies[0].exists());
+    assert_eq!(fs::read_to_string(&cookies).unwrap(), COOKIES);
+}
+
+#[tokio::test]
+async fn an_unprotected_cookie_file_is_left_out() {
+    let (dir, path) = fake_yt_dlp(&reading_cookies(&video_script()));
+    let cookies = cookie_file(&dir, 0o644);
+    let query = QueryType::Phrase("get lucky".to_owned());
+    resolve_with(
+        &with_cookies(&path, &cookies),
+        &query,
+        LIMIT,
+        Clients::Default,
+    )
+    .await
+    .unwrap();
+    assert!(!runs(&dir)[0].contains("--cookies"));
+}
+
+#[tokio::test]
+async fn without_a_cookie_file_no_cookies_are_passed() {
+    let (dir, path) = fake_yt_dlp(&reading_cookies(&video_script()));
+    let query = QueryType::Phrase("get lucky".to_owned());
+    resolve_with(&config(&path), &query, LIMIT, Clients::Default)
+        .await
+        .unwrap();
+    assert!(!runs(&dir)[0].contains("--cookies"));
 }

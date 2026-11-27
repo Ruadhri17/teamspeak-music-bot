@@ -19,7 +19,7 @@ use crate::{
     audio::{AudioInput, read_tail},
     config::YoutubeConfig,
     process::{self, Stopper, TermOnDrop},
-    sources::{Found, Location, Playlist, QueryType, TrackRef},
+    sources::{Found, Location, Playlist, QueryType, TrackRef, cookies::CookieCopy},
 };
 
 const YT_VIDEO_URL: &str = "https://www.youtube.com/watch?v=";
@@ -227,7 +227,10 @@ async fn lookup(
     limit: Option<NonZeroUsize>,
     clients: Clients,
 ) -> Result<Vec<u8>, YoutubeError> {
-    let mut cmd = yt_dlp_command(config, clients);
+    let YtDlp {
+        command: mut cmd,
+        cookies: _cookies,
+    } = yt_dlp_command(config, clients);
     // Private and deleted videos are left out of playlists instead of listed under a placeholder.
     cmd.args(["--flat-playlist", "--dump-single-json"])
         .args(["--compat-options", "no-youtube-unavailable-videos"]);
@@ -280,18 +283,45 @@ pub enum Clients {
     Default,
 }
 
+/// A `yt-dlp` run before it starts.
+struct YtDlp {
+    /// `std` command, `lookup` turns it into a tokio one.
+    command: std::process::Command,
+    /// Keep it until the process has exited, dropping it removes the file.
+    cookies: Option<CookieCopy>,
+}
+
 /// Options shared by every `yt-dlp` run. Callers add their own options, then `--` and the target.
-/// `std` command, `lookup` turns it into a tokio one.
-fn yt_dlp_command(config: &YoutubeConfig, clients: Clients) -> std::process::Command {
-    let mut cmd = std::process::Command::new(&config.yt_dlp_path);
-    cmd.args(["--ignore-config", "--no-warnings"]);
-    if clients == Clients::Preferred && !config.player_clients.is_empty() {
-        cmd.arg("--extractor-args").arg(format!(
+fn yt_dlp_command(config: &YoutubeConfig, clients: Clients) -> YtDlp {
+    let mut command = std::process::Command::new(&config.yt_dlp_path);
+    command.args(["--ignore-config", "--no-warnings"]);
+    let preferred = clients == Clients::Preferred && !config.player_clients.is_empty();
+    if preferred {
+        command.arg("--extractor-args").arg(format!(
             "youtube:player_client={}",
             config.player_clients.join(",")
         ));
     }
-    cmd
+    // The preferred clients (`visionos`) do not take cookies, so the account is used only
+    // when the `yt-dlp` defaults are.
+    let cookies = config
+        .cookies_file
+        .as_deref()
+        .filter(|_| !preferred)
+        .and_then(|path| match CookieCopy::new(path) {
+            Ok(cookies) => Some(cookies),
+            Err(err) => {
+                warn!(
+                    "{:#}, yt-dlp runs without cookies",
+                    anyhow::Error::from(err)
+                );
+                None
+            }
+        });
+    if let Some(cookies) = &cookies {
+        command.arg("--cookies").arg(cookies.path());
+    }
+    YtDlp { command, cookies }
 }
 
 /// The two shapes of `yt-dlp --flat-playlist --dump-single-json`, told apart by `_type`.
@@ -373,8 +403,9 @@ pub fn open_with(
     config: &YoutubeConfig,
     id: &VideoId,
     clients: Clients,
+    stop: &Stopper,
 ) -> Result<AudioInput, YoutubeError> {
-    start(config, id, clients, 1, Stopper::new())
+    start(config, id, clients, 1, stop.clone())
 }
 
 /// Spawns the first `yt-dlp`, the reader spawns the rest, up to `attempts` in total.
@@ -413,7 +444,11 @@ impl Stream {
     /// the audio-only formats, a higher resolution would only cost bandwidth.
     /// The process is watched by `stop`: SIGTERM, so `yt-dlp` still cleans up after itself.
     fn spawn(&self, clients: Clients, stop: &Stopper) -> io::Result<Running> {
-        let mut child = yt_dlp_command(&self.config, clients)
+        let YtDlp {
+            mut command,
+            cookies,
+        } = yt_dlp_command(&self.config, clients);
+        let mut child = command
             .args([
                 "--no-playlist",
                 "--quiet",
@@ -443,6 +478,7 @@ impl Stream {
             child,
             stdout,
             stderr: Some(stderr),
+            _cookies: cookies,
         })
     }
 }
@@ -499,6 +535,8 @@ struct Running {
     stdout: ChildStdout,
     /// Taken when the process ends, so the tail is logged once.
     stderr: Option<JoinHandle<String>>,
+    /// Fields drop after `drop` has stopped the process, so it never loses its cookies.
+    _cookies: Option<CookieCopy>,
 }
 
 impl Running {

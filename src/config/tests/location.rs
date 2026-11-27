@@ -231,6 +231,9 @@ sound = "sounds/hi.wav"
 
 [sources.local]
 music_dir = "music"
+
+[sources.youtube]
+cookies_file = "youtube-cookies.txt"
 "#,
     );
     let config = location.load().unwrap();
@@ -250,6 +253,10 @@ music_dir = "music"
         Some(Sound::File(base.join("sounds/hi.wav")))
     );
     assert_eq!(config.sources.local.music_dir, Some(base.join("music")));
+    assert_eq!(
+        config.sources.youtube.cookies_file,
+        Some(base.join("youtube-cookies.txt"))
+    );
 }
 
 #[test]
@@ -287,6 +294,7 @@ fn load_keeps_missing_optional_paths_empty() {
     assert_eq!(config.events.on_alone.sound, None);
     assert_eq!(config.events.on_party.sound, None);
     assert_eq!(config.sources.local.music_dir, None);
+    assert_eq!(config.sources.youtube.cookies_file, None);
 }
 
 #[test]

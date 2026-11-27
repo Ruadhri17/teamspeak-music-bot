@@ -11,9 +11,10 @@ use std::{
 
 use crate::{
     audio::{Decoder, FRAME_DURATION},
-    check_dependencies,
+    check_cookies, check_dependencies,
     config::{Config, ConfigLocation, LogLevel, YoutubeConfig},
     logging,
+    process::Stopper,
     sources::{
         Location, QueryType, parse_query,
         youtube::{self, Clients, VideoId},
@@ -37,6 +38,7 @@ pub async fn run(
     for (name, version) in versions {
         println!("  {name:<7} {version}");
     }
+    check_cookies(&config)?;
     check(&config, query, full).await
 }
 
@@ -76,9 +78,15 @@ async fn check(config: &Config, query: &str, full: bool) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// The paths the bot can take: the configured clients first, then the yt-dlp defaults.
+/// The paths the bot can take: the configured clients first, then the yt-dlp defaults,
+/// which are the only ones that use the cookies.
 fn paths(youtube: &YoutubeConfig) -> Vec<(String, Clients)> {
-    let defaults = ("yt-dlp defaults".to_owned(), Clients::Default);
+    let label = if youtube.cookies_file.is_some() {
+        "yt-dlp defaults with cookies"
+    } else {
+        "yt-dlp defaults"
+    };
+    let defaults = (label.to_owned(), Clients::Default);
     if youtube.player_clients.is_empty() {
         vec![defaults]
     } else {
@@ -145,6 +153,8 @@ struct Decoded {
 }
 
 /// Streams the video through the same `Decoder` the bot uses, up to `limit` of audio.
+/// Ends `yt-dlp` and waits for it before returning: the program exits right after, which
+/// would leave the process and its copy of the cookies behind.
 fn decode(
     ffmpeg: &Path,
     youtube: &YoutubeConfig,
@@ -153,8 +163,16 @@ fn decode(
     limit: Option<Duration>,
 ) -> anyhow::Result<Decoded> {
     let start = Instant::now();
-    let input = youtube::open_with(youtube, id, clients)?;
+    let stop = Stopper::new();
+    let input = youtube::open_with(youtube, id, clients, &stop)?;
     let mut decoder = Decoder::spawn(ffmpeg, input)?;
+    let decoded = read(&mut decoder, start, limit);
+    stop.stop();
+    decoder.close();
+    decoded
+}
+
+fn read(decoder: &mut Decoder, start: Instant, limit: Option<Duration>) -> anyhow::Result<Decoded> {
     let mut first_audio = None;
     let mut audio = Duration::ZERO;
 

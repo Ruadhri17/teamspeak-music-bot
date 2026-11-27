@@ -152,6 +152,9 @@ fn empty_optional_values_are_rejected() {
         ("sources.local.music_dir", |c| {
             c.sources.local.music_dir = Some(PathBuf::new())
         }),
+        ("sources.youtube.cookies_file", |c| {
+            c.sources.youtube.cookies_file = Some(PathBuf::new())
+        }),
         ("events.on_idle.sound", |c| {
             c.events.on_idle.sound = Some(Sound::File(PathBuf::new()))
         }),

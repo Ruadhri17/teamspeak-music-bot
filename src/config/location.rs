@@ -100,8 +100,8 @@ impl ConfigLocation {
         Ok(config)
     }
 
-    /// Makes relative paths (`state_dir`, `secrets_file`, event sound files, `music_dir`)
-    /// relative to `base_dir`. Links in event sounds stay as they are.
+    /// Makes relative paths (`state_dir`, `secrets_file`, event sound files, `music_dir`,
+    /// `cookies_file`) relative to `base_dir`. Links in event sounds stay as they are.
     /// Bare program names (`ffmpeg`, `yt-dlp`) stay as they are and are looked up in `PATH`.
     /// `teamspeak.identity_file` is relative to `state_dir` and is joined where it is used.
     fn resolve_paths(&self, config: &mut Config) {
@@ -120,7 +120,11 @@ impl ConfigLocation {
             Some(Sound::File(path)) => Some(path),
             _ => None,
         });
-        for path in sound_files.chain(config.sources.local.music_dir.as_mut()) {
+        let optional = [
+            config.sources.local.music_dir.as_mut(),
+            config.sources.youtube.cookies_file.as_mut(),
+        ];
+        for path in sound_files.chain(optional.into_iter().flatten()) {
             self.resolve(path);
         }
 

@@ -292,6 +292,10 @@ pub struct YoutubeConfig {
     /// YouTube clients tried first. If they fail, `yt-dlp` retries with its own defaults.
     /// Empty = `yt-dlp` always chooses.
     pub player_clients: Vec<String>,
+    /// Netscape cookies of a YouTube account, for runs with the `yt-dlp` default clients
+    /// (the preferred ones do not take cookies). Must be private to the bot's user.
+    /// `None` = no account.
+    pub cookies_file: Option<PathBuf>,
 }
 
 impl Default for YoutubeConfig {
@@ -300,6 +304,7 @@ impl Default for YoutubeConfig {
             yt_dlp_path: "yt-dlp".into(),
             // Needs no JS challenges, so audio starts in about 2 s instead of about 9 s.
             player_clients: vec!["visionos".into()],
+            cookies_file: None,
         }
     }
 }
